@@ -4,6 +4,9 @@ import cv2
 import numpy as np
 from ocamcamera import OcamCamera
 from torch.utils.data import Dataset
+import matplotlib.pyplot as plt
+import numpy as np
+from torch.utils.data import DataLoader
 
 
 class OmniStereoDataset(Dataset):
@@ -21,7 +24,9 @@ class OmniStereoDataset(Dataset):
         self.filenames = data.strip().split('\n')
 
         # folder name
+        # self.cam_list = ['cam1', 'cam2', 'cam3']
         self.cam_list = ['cam1', 'cam2', 'cam3', 'cam4']
+
         # self.depth_folder = 'depth_train_640'
         self.depth_folder = 'depth_train_omni'
         print(f"Using depth folder: {self.depth_folder}")
@@ -75,3 +80,39 @@ def load_image(filename, gray=True, valid=None):
     if not valid is None:
         img[valid == 0] = 0
     return img
+
+
+if __name__ == "__main__":
+    # folder và file list
+    root_dir = r"F:\tmp\datasets\omnithings"  # đổi path theo dataset
+    train_list = r".\dataloader\omnithings_train.txt"
+
+    # tạo dataset
+    dataset = OmniStereoDataset(root_dir=root_dir, filename_txt=train_list, fov=220)
+    print(f"Dataset size: {len(dataset)}")
+
+    # tạo DataLoader
+    loader = DataLoader(dataset, batch_size=1, shuffle=True)
+
+    # lấy 1 sample
+    sample = next(iter(loader))
+    cam_list = dataset.cam_list
+
+    # show images
+    plt.figure(figsize=(12, 4))
+    for i, cam in enumerate(cam_list):
+        img = sample[cam][0].numpy()  # shape (H, W)
+        plt.subplot(1, len(cam_list)+1, i+1)
+        plt.imshow(img, cmap='gray')
+        plt.title(cam)
+        plt.axis('off')
+
+    # show inverse depth (gt)
+    gt_idepth = sample['idepth'][0].numpy()
+    plt.subplot(1, len(cam_list)+1, len(cam_list)+1)
+    plt.imshow(gt_idepth, cmap='jet')
+    plt.title('GT Inverse Depth')
+    plt.axis('off')
+
+    plt.tight_layout()
+    plt.show()
