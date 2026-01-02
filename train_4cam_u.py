@@ -2,7 +2,6 @@ import argparse, os, json, math
 from os.path import join
 from collections import OrderedDict
 from datetime import datetime
-from concurrent.futures import ThreadPoolExecutor
 
 import torch
 import torch.nn as nn
@@ -24,9 +23,14 @@ from utils import InvDepthConverter, evaluation_metrics
 # ARGUMENTS
 # ----------------------------
 parser = argparse.ArgumentParser()
+# parser.add_argument('root_dir', nargs='?', default=r'F:\tmp\datasets\omnithings')
+# parser.add_argument('-t', '--train-list', default=r'.\dataloader\omnithings_train.txt', type=str)
+# parser.add_argument('-v', '--val-list', default=r'.\dataloader\omnithings_val.txt', type=str)
+
 parser.add_argument('root_dir', nargs='?', default=r'/home/sw-tamnguyen/Desktop/depth_project/datasets/datasets/omnithings')
 parser.add_argument('-t', '--train-list', default=r'./dataloader/omnithings_train.txt', type=str)
 parser.add_argument('-v', '--val-list', default=r'./dataloader/omnithings_val.txt', type=str)
+
 parser.add_argument('--epochs', default=100, type=int)
 parser.add_argument('--pretrained', default=None)
 parser.add_argument('-b', '--batch-size', default=2, type=int)
@@ -67,9 +71,9 @@ def save_rgb_image(img_tensor, path):
 # TRAINING LOOP
 # ----------------------------
 def train(args, model, train_loader, optimizer, writer, epoch, device):
-    invd_0, invd_max = model.module.inv_depths[0], model.module.inv_depths[-1]
+    invd_0, invd_max = model.inv_depths[0], model.inv_depths[-1]
     converter = InvDepthConverter(args.ndisp, invd_0, invd_max)
-    ndisp = model.module.ndisp
+    ndisp = model.ndisp
 
     model.train()
     losses = []
@@ -89,15 +93,6 @@ def train(args, model, train_loader, optimizer, writer, epoch, device):
 
         pbar.set_postfix(OrderedDict(epoch=f"{epoch}", loss=f"{losses[-1]:.4f}"))
 
-        # niter = epoch * len(train_loader) + idx
-        # if idx % args.log_interval == 0:
-        #     writer.add_scalar('train/loss', loss.item(), niter)
-        #     # --- Lưu ảnh RGB và GT thực ---
-        #     for cam in model.module.cam_list:
-        #         save_rgb_image(batch[cam][0], f"train_epoch{epoch}_idx{idx}_{cam}.png")
-        #     save_depth_as_colormap(batch['idepth'][0:1], f"train_epoch{epoch}_idx{idx}_gt.png", vmin=0.0, vmax=None)
-        #     save_depth_as_colormap(pred[0:1], f"train_epoch{epoch}_idx{idx}_pred.png", vmin=0, vmax=ndisp)
-
     ave_loss = sum(losses)/len(losses)
     writer.add_scalar('train/loss_ave', ave_loss, epoch)
     return ave_loss
@@ -108,9 +103,9 @@ def train(args, model, train_loader, optimizer, writer, epoch, device):
 def validation(args, model, val_loader, writer, epoch, device, save_dir='./val_results'):
     os.makedirs(save_dir, exist_ok=True)
     model.eval()
-    invd_0, invd_max = model.module.inv_depths[0], model.module.inv_depths[-1]
+    invd_0, invd_max = model.inv_depths[0], model.inv_depths[-1]
     converter = InvDepthConverter(args.ndisp, invd_0, invd_max)
-    ndisp = model.module.ndisp
+    ndisp = model.ndisp
 
     preds, gts, losses = [], [], []
     pbar = tqdm(val_loader)
@@ -127,11 +122,10 @@ def validation(args, model, val_loader, writer, epoch, device, save_dir='./val_r
             gts.append(gt_idx.cpu())
 
             # Lưu ảnh RGB
-            for cam in model.module.cam_list:
+            for cam in model.cam_list:
                 save_rgb_image(batch[cam][0], join(save_dir, f'epoch{epoch}_idx{idx}_{cam}.png'))
-            # Lưu ảnh depth
+            # Lưu depth map
             save_depth_as_colormap(pred[0:1], join(save_dir, f'epoch{epoch}_idx{idx}_pred.png'), vmin=0, vmax=ndisp)
-            # **Sửa lỗi GT: dùng batch['idepth'] thay vì gt_idx**
             save_depth_as_colormap(batch['idepth'][0:1], join(save_dir, f'epoch{epoch}_idx{idx}_gt.png'), vmin=0.0, vmax=None)
 
         pbar.set_postfix(OrderedDict(epoch=f"{epoch}", loss=f"{losses[-1]:.4f}"))
@@ -163,7 +157,7 @@ def main():
     sweep = SphericalSweeping(args.root_dir, h=args.output_height, w=args.output_width, fov=args.fov)
     model = OmniMVS(sweep, args.ndisp, args.min_depth, h=args.output_height, w=args.output_width).to(device)
 
-    # Precompute grids (bỏ ThreadPoolExecutor, làm tuần tự)
+    # Precompute grids tuần tự
     for i in range(4):
         for d in model.depths[::2]:
             sweep.get_grid(i, d)
@@ -171,7 +165,7 @@ def main():
     optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=2*args.epochs//3, gamma=0.1)
 
-    # Load pretrained
+    # Load pretrained nếu có
     start_epoch = 0
     if args.pretrained:
         checkpoint = torch.load(args.pretrained, map_location=device)
@@ -179,9 +173,6 @@ def main():
         optimizer.load_state_dict(checkpoint['optimizer'])
         scheduler.load_state_dict(checkpoint['scheduler'])
         start_epoch = checkpoint['epoch']
-
-    # Không dùng DataParallel nữa
-    # model = nn.DataParallel(model)
 
     # Logger
     timestamp = datetime.now().strftime("%m%d-%H%M")
