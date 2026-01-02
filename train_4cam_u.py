@@ -147,6 +147,8 @@ def validation(args, model, val_loader, writer, epoch, device, save_dir='./val_r
 # ----------------------------
 # MAIN
 # ----------------------------
+from torch.utils.data import random_split
+
 def main():
     args = parser.parse_args()
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -189,10 +191,19 @@ def main():
     trainset = OmniStereoDataset(args.root_dir, args.train_list, transform=transform, fov=args.fov)
 
     # Subset demo
-    subset_size = math.ceil(len(trainset)/300)
+    subset_size = math.ceil(len(trainset)/50)
     train_subset = Subset(trainset, range(subset_size))
     train_loader = DataLoader(train_subset, batch_size=args.batch_size, shuffle=True)
-    val_loader = DataLoader(train_subset, batch_size=1, shuffle=False)
+    # val_loader = DataLoader(train_subset, batch_size=1, shuffle=False)
+
+    # Chia train_subset thành train nhỏ và val
+    train_size = int(0.9 * len(train_subset))
+    val_size = len(train_subset) - train_size
+    train_small, val_small = random_split(train_subset, [train_size, val_size])
+
+    # train_loader = DataLoader(train_small, batch_size=args.batch_size, shuffle=True)
+    val_loader = DataLoader(val_small, batch_size=1, shuffle=False)
+
 
     # Training loop
     for epoch in range(start_epoch, args.epochs):
