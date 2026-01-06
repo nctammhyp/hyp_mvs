@@ -31,7 +31,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument(
     'root_dir',
     nargs='?',
-    default='tamnguyen/Desktop/depth_project/datasets/datasets/omnithings'
+    default='/home/sw-tamnguyen/Desktop/depth_project/datasets/datasets/omnithings'
 )
 
 parser.add_argument(
