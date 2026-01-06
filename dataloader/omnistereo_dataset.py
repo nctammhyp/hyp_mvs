@@ -27,8 +27,8 @@ class OmniStereoDataset(Dataset):
         # self.cam_list = ['cam1', 'cam2', 'cam3']
         self.cam_list = ['cam1', 'cam2', 'cam3', 'cam4']
 
-        # self.depth_folder = 'depth_train_640'
-        self.depth_folder = 'depth_train_omni'
+        self.depth_folder = 'depth_train_640'
+        # self.depth_folder = 'depth_train_omni'
         print(f"Using depth folder: {self.depth_folder}")
 
         # load ocam calibration data and generate valid image
