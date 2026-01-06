@@ -32,7 +32,7 @@ parser.add_argument('--pretrained', default=None)
 parser.add_argument('-b', '--batch-size', default=2, type=int)
 parser.add_argument('--min_depth', type=float, default=0.55)
 parser.add_argument('--fov', type=float, default=220)
-parser.add_argument('--ndisp', type=int, default=32)
+parser.add_argument('--ndisp', type=int, default=16)
 parser.add_argument('--input_width', type=int, default=500)
 parser.add_argument('--input_height', type=int, default=480)
 parser.add_argument('--output_width', type=int, default=512)
@@ -79,6 +79,13 @@ def train(args, model, train_loader, optimizer, writer, epoch, device):
             batch[k] = batch[k].to(device)
 
         pred = model(batch)
+
+        print(f"batchsize: {batch['cam1']}")
+        print(f"batchsize: {batch['cam1'].size()}")
+        print(f"pred: {pred.size()}")
+
+
+
         gt_idx = converter.invdepth_to_index(batch['idepth'])
         loss = nn.L1Loss()(pred, gt_idx)
 
