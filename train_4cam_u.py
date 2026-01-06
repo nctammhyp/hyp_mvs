@@ -105,19 +105,19 @@ def train(args, model, loader, optimizer, writer, epoch, device):
         losses.append(loss.item())
         pbar.set_postfix(epoch=epoch, loss=f"{loss.item():.4f}")
 
-        niter = epoch * len(loader) + idx
-        if idx % args.log_interval == 0:
-            writer.add_scalar("train/loss", loss.item(), niter)
+        # niter = epoch * len(loader) + idx
+        # if idx % args.log_interval == 0:
+        #     writer.add_scalar("train/loss", loss.item(), niter)
 
-            for cam in model.cam_list:
-                save_rgb_image(batch[cam][0],
-                               f"train_e{epoch}_i{idx}_{cam}.png")
+        #     for cam in model.cam_list:
+        #         save_rgb_image(batch[cam][0],
+        #                        f"train_e{epoch}_i{idx}_{cam}.png")
 
-            save_depth_as_colormap(batch['idepth'][0:1],
-                                   f"train_e{epoch}_i{idx}_gt.png")
-            save_depth_as_colormap(pred[0:1],
-                                   f"train_e{epoch}_i{idx}_pred.png",
-                                   vmin=0, vmax=args.ndisp)
+        #     save_depth_as_colormap(batch['idepth'][0:1],
+        #                            f"train_e{epoch}_i{idx}_gt.png")
+        #     save_depth_as_colormap(pred[0:1],
+        #                            f"train_e{epoch}_i{idx}_pred.png",
+        #                            vmin=0, vmax=args.ndisp)
 
     ave = sum(losses) / len(losses)
     writer.add_scalar("train/loss_ave", ave, epoch)
@@ -237,7 +237,7 @@ def main():
                                  transform=transform,
                                  fov=args.fov)
 
-    subset_size = math.ceil(len(trainset) / 300)
+    subset_size = math.ceil(len(trainset) / 30)
     subset = Subset(trainset, range(subset_size))
 
     train_loader = DataLoader(subset,
