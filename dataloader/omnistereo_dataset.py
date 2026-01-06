@@ -35,7 +35,7 @@ class OmniStereoDataset(Dataset):
         self.ocams = []
         self.valids = []
         for cam in self.cam_list:
-            ocam_file = join(root_dir, f'o{cam}.txt')
+            ocam_file = join(root_dir, f'o{cam}_de.txt')
             self.ocams.append(OcamCamera(ocam_file, fov, show_flag=False))
             self.valids.append(self.ocams[-1].valid_area())
 

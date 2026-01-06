@@ -32,7 +32,7 @@ parser.add_argument('--pretrained', default=None)
 parser.add_argument('-b', '--batch-size', default=2, type=int)
 parser.add_argument('--min_depth', type=float, default=0.55)
 parser.add_argument('--fov', type=float, default=220)
-parser.add_argument('--ndisp', type=int, default=64)
+parser.add_argument('--ndisp', type=int, default=32)
 parser.add_argument('--input_width', type=int, default=500)
 parser.add_argument('--input_height', type=int, default=480)
 parser.add_argument('--output_width', type=int, default=512)
@@ -89,14 +89,14 @@ def train(args, model, train_loader, optimizer, writer, epoch, device):
 
         pbar.set_postfix(OrderedDict(epoch=f"{epoch}", loss=f"{losses[-1]:.4f}"))
 
-        # niter = epoch * len(train_loader) + idx
-        # if idx % args.log_interval == 0:
-        #     writer.add_scalar('train/loss', loss.item(), niter)
-        #     # --- Lưu ảnh RGB và GT thực ---
-        #     for cam in model.module.cam_list:
-        #         save_rgb_image(batch[cam][0], f"train_epoch{epoch}_idx{idx}_{cam}.png")
-        #     save_depth_as_colormap(batch['idepth'][0:1], f"train_epoch{epoch}_idx{idx}_gt.png", vmin=0.0, vmax=None)
-        #     save_depth_as_colormap(pred[0:1], f"train_epoch{epoch}_idx{idx}_pred.png", vmin=0, vmax=ndisp)
+        niter = epoch * len(train_loader) + idx
+        if idx % args.log_interval == 0:
+            writer.add_scalar('train/loss', loss.item(), niter)
+            # --- Lưu ảnh RGB và GT thực ---
+            for cam in model.module.cam_list:
+                save_rgb_image(batch[cam][0], f"train_epoch{epoch}_idx{idx}_{cam}.png")
+            save_depth_as_colormap(batch['idepth'][0:1], f"train_epoch{epoch}_idx{idx}_gt.png", vmin=0.0, vmax=None)
+            save_depth_as_colormap(pred[0:1], f"train_epoch{epoch}_idx{idx}_pred.png", vmin=0, vmax=ndisp)
 
     ave_loss = sum(losses)/len(losses)
     writer.add_scalar('train/loss_ave', ave_loss, epoch)
@@ -198,7 +198,7 @@ def main():
     trainset = OmniStereoDataset(args.root_dir, args.train_list, transform=transform, fov=args.fov)
 
     # Subset demo
-    subset_size = math.ceil(len(trainset)/100)
+    subset_size = math.ceil(len(trainset)/300)
     train_subset = Subset(trainset, range(subset_size))
     train_loader = DataLoader(train_subset, batch_size=args.batch_size, shuffle=True)
     val_loader = DataLoader(train_subset, batch_size=1, shuffle=False)
