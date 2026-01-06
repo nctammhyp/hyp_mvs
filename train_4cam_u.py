@@ -200,19 +200,26 @@ def main():
             pool.submit(sweep.get_grid, i, d)
     pool.shutdown()
 
-    optimizer = torch.optim.SGD(model.parameters(),
-                                lr=args.lr,
-                                momentum=args.momentum)
-    scheduler = torch.optim.lr_scheduler.StepLR(
-        optimizer, step_size=2 * args.epochs // 3, gamma=0.1
+    # optimizer = torch.optim.SGD(model.parameters(),
+    #                             lr=args.lr,
+    #                             momentum=args.momentum)
+    optimizer = torch.optim.Adam(
+        model.parameters(),
+        lr=args.lr,
+        betas=(0.9, 0.999),  # default values
+        # weight_decay=0.0    # optional
     )
+
+    # scheduler = torch.optim.lr_scheduler.StepLR(
+    #     optimizer, step_size=2 * args.epochs // 3, gamma=0.1
+    # )
 
     start_epoch = 0
     if args.pretrained:
         ckpt = torch.load(args.pretrained, map_location=device)
         model.load_state_dict(ckpt['state_dict'])
         optimizer.load_state_dict(ckpt['optimizer'])
-        scheduler.load_state_dict(ckpt['scheduler'])
+        # scheduler.load_state_dict(ckpt['scheduler'])
         start_epoch = ckpt['epoch']
 
     # Logger
@@ -256,13 +263,13 @@ def main():
                         join(log_dir, "val"))
 
         print(f"[Epoch {epoch}] Train={tr:.4f}  Val={va:.4f}")
-        scheduler.step()
+        # scheduler.step()
 
         torch.save({
             'epoch': epoch + 1,
             'state_dict': model.state_dict(),
             'optimizer': optimizer.state_dict(),
-            'scheduler': scheduler.state_dict(),
+            # 'scheduler': scheduler.state_dict(),
             'ave_loss': va,
         }, join(log_dir, f"checkpoint_{epoch}.pth"))
 
