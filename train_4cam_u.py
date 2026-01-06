@@ -50,7 +50,7 @@ parser.add_argument('--pretrained', default=None)
 parser.add_argument('-b', '--batch-size', default=4, type=int)
 parser.add_argument('--min_depth', type=float, default=0.55)
 parser.add_argument('--fov', type=float, default=220)
-parser.add_argument('--ndisp', type=int, default=64)
+parser.add_argument('--ndisp', type=int, default=48)
 parser.add_argument('--input_width', type=int, default=500)
 parser.add_argument('--input_height', type=int, default=480)
 parser.add_argument('--output_width', type=int, default=512)
@@ -239,18 +239,36 @@ def main():
         Normalize()
     ])
 
+    # trainset = OmniStereoDataset(args.root_dir,
+    #                              args.train_list,
+    #                              transform=transform,
+    #                              fov=args.fov)
+
+    # subset_size = math.ceil(len(trainset) / 30)
+    # subset = Subset(trainset, range(subset_size))
+
+    # train_loader = DataLoader(subset,
+    #                           batch_size=args.batch_size,
+    #                           shuffle=True)
+    # val_loader = DataLoader(subset,
+    #                         batch_size=1,
+    #                         shuffle=False)
+
     trainset = OmniStereoDataset(args.root_dir,
                                  args.train_list,
                                  transform=transform,
                                  fov=args.fov)
-
-    subset_size = math.ceil(len(trainset) / 30)
-    subset = Subset(trainset, range(subset_size))
-
-    train_loader = DataLoader(subset,
+    
+    valset = OmniStereoDataset(args.root_dir,
+                               args.val_list,
+                               transform=transform,
+                               fov=args.fov)
+    
+    train_loader = DataLoader(trainset,
                               batch_size=args.batch_size,
                               shuffle=True)
-    val_loader = DataLoader(subset,
+
+    val_loader = DataLoader(valset,
                             batch_size=1,
                             shuffle=False)
 
