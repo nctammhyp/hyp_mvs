@@ -19,6 +19,13 @@ from dataloader import OmniStereoDataset
 from dataloader.custom_transforms import Resize, ToTensor, Normalize
 from models import OmniMVS, SphericalSweeping
 from utils import InvDepthConverter, evaluation_metrics
+import random
+
+torch.backends.cudnn.deterministic = True
+random.seed(42)
+np.random.seed(42)
+torch.manual_seed(42)
+torch.cuda.manual_seed_all(42)
 
 # ----------------------------
 # ARGUMENTS
@@ -239,38 +246,38 @@ def main():
         Normalize()
     ])
 
-    # trainset = OmniStereoDataset(args.root_dir,
-    #                              args.train_list,
-    #                              transform=transform,
-    #                              fov=args.fov)
-
-    # subset_size = math.ceil(len(trainset) / 30)
-    # subset = Subset(trainset, range(subset_size))
-
-    # train_loader = DataLoader(subset,
-    #                           batch_size=args.batch_size,
-    #                           shuffle=True)
-    # val_loader = DataLoader(subset,
-    #                         batch_size=1,
-    #                         shuffle=False)
-
     trainset = OmniStereoDataset(args.root_dir,
                                  args.train_list,
                                  transform=transform,
                                  fov=args.fov)
-    
-    valset = OmniStereoDataset(args.root_dir,
-                               args.val_list,
-                               transform=transform,
-                               fov=args.fov)
-    
-    train_loader = DataLoader(trainset,
+
+    subset_size = math.ceil(len(trainset) / 300)
+    subset = Subset(trainset, range(subset_size))
+
+    train_loader = DataLoader(subset,
                               batch_size=args.batch_size,
                               shuffle=True)
-
-    val_loader = DataLoader(valset,
+    val_loader = DataLoader(subset,
                             batch_size=1,
                             shuffle=False)
+
+    # trainset = OmniStereoDataset(args.root_dir,
+    #                              args.train_list,
+    #                              transform=transform,
+    #                              fov=args.fov)
+    
+    # valset = OmniStereoDataset(args.root_dir,
+    #                            args.val_list,
+    #                            transform=transform,
+    #                            fov=args.fov)
+    
+    # train_loader = DataLoader(trainset,
+    #                           batch_size=args.batch_size,
+    #                           shuffle=True)
+
+    # val_loader = DataLoader(valset,
+    #                         batch_size=1,
+    #                         shuffle=False)
 
     # Training loop
     for epoch in range(start_epoch, args.epochs):

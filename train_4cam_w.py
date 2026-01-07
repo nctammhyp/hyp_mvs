@@ -19,6 +19,13 @@ from dataloader import OmniStereoDataset
 from dataloader.custom_transforms import Resize, ToTensor, Normalize
 from models import OmniMVS, SphericalSweeping
 from utils import InvDepthConverter, evaluation_metrics
+import random
+
+torch.backends.cudnn.deterministic = True
+random.seed(42)
+np.random.seed(42)
+torch.manual_seed(42)
+torch.cuda.manual_seed_all(42)
 
 # ----------------------------
 # ARGUMENTS
@@ -32,12 +39,12 @@ parser.add_argument('--pretrained', default=None)
 parser.add_argument('-b', '--batch-size', default=2, type=int)
 parser.add_argument('--min_depth', type=float, default=0.55)
 parser.add_argument('--fov', type=float, default=220)
-parser.add_argument('--ndisp', type=int, default=16)
+parser.add_argument('--ndisp', type=int, default=48)
 parser.add_argument('--input_width', type=int, default=500)
 parser.add_argument('--input_height', type=int, default=480)
 parser.add_argument('--output_width', type=int, default=512)
 parser.add_argument('--output_height', type=int, default=256)
-parser.add_argument('--lr', default=5e-4, type=float)
+parser.add_argument('--lr', default=3e-4, type=float)
 parser.add_argument('--momentum', default=0.9, type=float)
 parser.add_argument('--arch', default='omni_small')
 parser.add_argument('--log-interval', default=5, type=int)
@@ -80,9 +87,9 @@ def train(args, model, train_loader, optimizer, writer, epoch, device):
 
         pred = model(batch)
 
-        print(f"batchsize: {batch['cam1']}")
-        print(f"batchsize: {batch['cam1'].size()}")
-        print(f"pred: {pred.size()}")
+        # print(f"batchsize: {batch['cam1']}")
+        # print(f"batchsize: {batch['cam1'].size()}")
+        # print(f"pred: {pred.size()}")
 
 
 
@@ -101,9 +108,9 @@ def train(args, model, train_loader, optimizer, writer, epoch, device):
             writer.add_scalar('train/loss', loss.item(), niter)
             # --- Lưu ảnh RGB và GT thực ---
             for cam in model.module.cam_list:
-                save_rgb_image(batch[cam][0], f"train_epoch{epoch}_idx{idx}_{cam}.png")
-            save_depth_as_colormap(batch['idepth'][0:1], f"train_epoch{epoch}_idx{idx}_gt.png", vmin=0.0, vmax=None)
-            save_depth_as_colormap(pred[0:1], f"train_epoch{epoch}_idx{idx}_pred.png", vmin=0, vmax=ndisp)
+                save_rgb_image(batch[cam][0], f"tmp/train_epoch{epoch}_idx{idx}_{cam}.png")
+            save_depth_as_colormap(batch['idepth'][0:1], f"tmp/train_epoch{epoch}_idx{idx}_gt.png", vmin=0.0, vmax=None)
+            save_depth_as_colormap(pred[0:1], f"tmp/train_epoch{epoch}_idx{idx}_pred.png", vmin=0, vmax=ndisp)
 
     ave_loss = sum(losses)/len(losses)
     writer.add_scalar('train/loss_ave', ave_loss, epoch)
