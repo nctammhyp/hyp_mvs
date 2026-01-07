@@ -16,11 +16,11 @@ ROOT_DIR = r"F:\tmp\datasets\omnithings"
 IMG_NAME = "00001.png"
 CAM_LIST = ["cam1", "cam2", "cam3", "cam4"]
 
-CHECKPOINT = r"F:\omnimvs_pytorch\checkpoints\pretrain\checkpoint_2.pth"  # đổi path
+CHECKPOINT = r"F:\omnimvs_pytorch\checkpoints\pretrain\checkpoint_13.pth"  # đổi path
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 FOV = 220
-NDISP = 64
+NDISP = 48
 MIN_DEPTH = 0.55
 
 INPUT_W, INPUT_H = 500, 480
