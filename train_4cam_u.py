@@ -207,15 +207,15 @@ def main():
             pool.submit(sweep.get_grid, i, d)
     pool.shutdown()
 
-    # optimizer = torch.optim.SGD(model.parameters(),
-    #                             lr=args.lr,
-    #                             momentum=args.momentum)
-    optimizer = torch.optim.Adam(
-        model.parameters(),
-        lr=args.lr,
-        betas=(0.9, 0.999),  # default values
-        # weight_decay=0.0    # optional
-    )
+    optimizer = torch.optim.SGD(model.parameters(),
+                                lr=args.lr,
+                                momentum=args.momentum)
+    # optimizer = torch.optim.Adam(
+    #     model.parameters(),
+    #     lr=args.lr,
+    #     betas=(0.9, 0.999),  # default values
+    #     # weight_decay=0.0    # optional
+    # )
 
     # scheduler = torch.optim.lr_scheduler.StepLR(
     #     optimizer, step_size=2 * args.epochs // 3, gamma=0.1
