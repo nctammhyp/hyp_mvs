@@ -21,6 +21,9 @@ from models import OmniMVS, SphericalSweeping
 from utils import InvDepthConverter, evaluation_metrics
 import random
 
+# ----------------------------
+# SEED
+# ----------------------------
 torch.backends.cudnn.deterministic = True
 random.seed(42)
 np.random.seed(42)
@@ -32,26 +35,13 @@ torch.cuda.manual_seed_all(42)
 # ----------------------------
 parser = argparse.ArgumentParser()
 
-# parser.add_argument('root_dir', nargs='?', default=r'F:\tmp\datasets\omnithings')
-# parser.add_argument('-t', '--train-list', default=r'.\dataloader\omnithings_train.txt', type=str)
-# parser.add_argument('-v', '--val-list', default=r'.\dataloader\omnithings_val.txt', type=str)
-
 parser.add_argument(
     'root_dir',
     nargs='?',
     default='/home/sw-tamnguyen/Desktop/depth_project/datasets/datasets/omnithings'
 )
-
-parser.add_argument(
-    '-t', '--train-list',
-    default='./dataloader/omnithings_train.txt'
-)
-
-parser.add_argument(
-    '-v', '--val-list',
-    default='./dataloader/omnithings_val.txt'
-)
-
+parser.add_argument('-t', '--train-list', default='./dataloader/omnithings_train.txt')
+parser.add_argument('-v', '--val-list', default='./dataloader/omnithings_val.txt')
 
 parser.add_argument('--epochs', default=100, type=int)
 parser.add_argument('--pretrained', default=None)
@@ -72,7 +62,6 @@ parser.add_argument('--log-interval', default=5, type=int)
 # UTILS
 # ----------------------------
 def save_depth_as_colormap(depth, path, vmin=None, vmax=None):
-    """Lưu depth map dưới dạng colormap"""
     depth = depth.detach().squeeze().cpu().numpy()
     if vmin is None: vmin = depth.min()
     if vmax is None: vmax = depth.max()
@@ -82,7 +71,6 @@ def save_depth_as_colormap(depth, path, vmin=None, vmax=None):
     plt.imsave(path, cmap)
 
 def save_rgb_image(img_tensor, path):
-    """Lưu ảnh RGB từ tensor"""
     img_tensor = img_tensor.detach()
     if img_tensor.shape[0] == 1:
         img_tensor = img_tensor.repeat(3,1,1)
@@ -90,7 +78,7 @@ def save_rgb_image(img_tensor, path):
     save_image(img_tensor, path)
 
 # ----------------------------
-# TRAINING LOOP
+# TRAIN
 # ----------------------------
 def train(args, model, train_loader, optimizer, writer, epoch, device):
     invd_0, invd_max = model.module.inv_depths[0], model.module.inv_depths[-1]
@@ -98,51 +86,32 @@ def train(args, model, train_loader, optimizer, writer, epoch, device):
     ndisp = model.module.ndisp
 
     criterion = nn.L1Loss()
-
     model.train()
     losses = []
-    pbar = tqdm(train_loader)
 
+    pbar = tqdm(train_loader)
     for idx, batch in enumerate(pbar):
         for k in batch:
             batch[k] = batch[k].to(device)
 
-        # ------------------
-        # Forward
-        # ------------------
-        pred = model(batch)   # [B,1,H,W] hoặc [B,H,W]
+        pred = model(batch)
 
-        # ------------------
-        # GT xử lý chống NaN
-        # ------------------
         idepth = batch['idepth']
-
         valid_mask = torch.isfinite(idepth) & (idepth > 0)
         idepth = torch.where(valid_mask, idepth, torch.zeros_like(idepth))
 
         gt_idx = converter.invdepth_to_index(idepth)
         gt_idx = torch.clamp(gt_idx, 0, ndisp - 1)
 
-        # ------------------
-        # Shape đồng bộ
-        # ------------------
         if pred.dim() == 4 and pred.size(1) == 1:
             pred = pred.squeeze(1)
-
         if gt_idx.dim() == 4 and gt_idx.size(1) == 1:
             gt_idx = gt_idx.squeeze(1)
 
-        # ------------------
-        # Loss
-        # ------------------
         loss = criterion(pred, gt_idx)
 
         optimizer.zero_grad()
         loss.backward()
-
-        # CLIP GRAD (RẤT QUAN TRỌNG)
-        # torch.nn.utils.clip_grad_norm_(model.parameters(), 5.0)
-
         optimizer.step()
 
         losses.append(loss.item())
@@ -152,16 +121,33 @@ def train(args, model, train_loader, optimizer, writer, epoch, device):
         if idx % args.log_interval == 0:
             writer.add_scalar('train/loss', loss.item(), niter)
 
+            save_root = f"tmp/train/epoch_{epoch}_idx_{idx}"
+            os.makedirs(save_root, exist_ok=True)
+
+            for cam in model.module.cam_list:
+                save_rgb_image(batch[cam][0], join(save_root, f"{cam}.png"))
+
+            save_depth_as_colormap(
+                batch['idepth'][0:1],
+                join(save_root, "gt.png"),
+                vmin=0.0
+            )
+
+            save_depth_as_colormap(
+                pred[0:1],
+                join(save_root, "pred.png"),
+                vmin=0,
+                vmax=ndisp
+            )
+
     ave_loss = sum(losses) / len(losses)
     writer.add_scalar('train/loss_ave', ave_loss, epoch)
     return ave_loss
 
-
-
 # ----------------------------
-# VALIDATION LOOP
+# VALIDATION
 # ----------------------------
-def validation(args, model, val_loader, writer, epoch, device, save_dir='./val_results'):
+def validation(args, model, val_loader, writer, epoch, device, save_dir='./tmp/val'):
     os.makedirs(save_dir, exist_ok=True)
 
     invd_0, invd_max = model.module.inv_depths[0], model.module.inv_depths[-1]
@@ -169,10 +155,8 @@ def validation(args, model, val_loader, writer, epoch, device, save_dir='./val_r
     ndisp = model.module.ndisp
 
     criterion = nn.L1Loss()
-
     model.eval()
-    losses = []
-    preds, gts = [], []
+    losses, preds, gts = [], [], []
 
     pbar = tqdm(val_loader)
     with torch.no_grad():
@@ -200,11 +184,25 @@ def validation(args, model, val_loader, writer, epoch, device, save_dir='./val_r
             preds.append(pred.cpu())
             gts.append(gt_idx.cpu())
 
-            pbar.set_postfix(epoch=epoch, loss=f"{loss.item():.4f}")
-
-            niter = epoch * len(val_loader) + idx
             if idx % args.log_interval == 0:
-                writer.add_scalar('val/loss', loss.item(), niter)
+                save_root = join(save_dir, f"epoch_{epoch}_idx_{idx}")
+                os.makedirs(save_root, exist_ok=True)
+
+                for cam in model.module.cam_list:
+                    save_rgb_image(batch[cam][0], join(save_root, f"{cam}.png"))
+
+                save_depth_as_colormap(
+                    pred[0:1],
+                    join(save_root, "pred.png"),
+                    vmin=0,
+                    vmax=ndisp
+                )
+
+                save_depth_as_colormap(
+                    batch['idepth'][0:1],
+                    join(save_root, "gt.png"),
+                    vmin=0.0
+                )
 
     ave_loss = sum(losses) / len(losses)
     writer.add_scalar('val/loss_ave', ave_loss, epoch)
@@ -212,13 +210,10 @@ def validation(args, model, val_loader, writer, epoch, device, save_dir='./val_r
     preds = torch.cat(preds)
     gts = torch.cat(gts)
     errors, names = evaluation_metrics(preds, gts, args.ndisp)
-
     for name, val in zip(names, errors):
         writer.add_scalar(f'val_metrics/{name}', val, epoch)
 
     return ave_loss
-
-
 
 # ----------------------------
 # MAIN
@@ -226,78 +221,57 @@ def validation(args, model, val_loader, writer, epoch, device, save_dir='./val_r
 def main():
     args = parser.parse_args()
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    if device.type != 'cpu': cudnn.benchmark = True
+    if device.type != 'cpu':
+        cudnn.benchmark = True
 
-    # Model
+    os.makedirs("tmp/train", exist_ok=True)
+    os.makedirs("tmp/val", exist_ok=True)
+
     sweep = SphericalSweeping(args.root_dir, h=args.output_height, w=args.output_width, fov=args.fov)
-    model = OmniMVS(sweep, args.ndisp, args.min_depth, h=args.output_height, w=args.output_width).to(device)
+    model = OmniMVS(sweep, args.ndisp, args.min_depth,
+                    h=args.output_height, w=args.output_width).to(device)
 
-    # Precompute grids
     pool = ThreadPoolExecutor(5)
     for i in range(4):
         for d in model.depths[::2]:
             pool.submit(sweep.get_grid, i, d)
     pool.shutdown()
 
-    # optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum)
-    optimizer = torch.optim.AdamW(
-        model.parameters(),
-        lr=1e-4,
-        weight_decay=1e-4
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4, weight_decay=1e-4)
+    scheduler = torch.optim.lr_scheduler.StepLR(
+        optimizer, step_size=2*args.epochs//3, gamma=0.1
     )
-
-    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=2*args.epochs//3, gamma=0.1)
-
-    # Load pretrained
-    start_epoch = 0
-    if args.pretrained:
-        checkpoint = torch.load(args.pretrained)
-        model.load_state_dict(checkpoint['state_dict'])
-        optimizer.load_state_dict(checkpoint['optimizer'])
-        scheduler.load_state_dict(checkpoint['scheduler'])
-        start_epoch = checkpoint['epoch']
 
     model = nn.DataParallel(model)
 
-    # Logger
     timestamp = datetime.now().strftime("%m%d-%H%M")
     log_folder = join('checkpoints', f'{args.arch}_{timestamp}')
     os.makedirs(log_folder, exist_ok=True)
     writer = SummaryWriter(log_dir=log_folder)
-    with open(join(log_folder, 'args.json'), 'w') as f:
-        json.dump(vars(args), f, indent=1)
 
-    # Datasets
     image_size = (args.input_width, args.input_height)
     depth_size = (args.output_width, args.output_height)
     transform = transforms.Compose([Resize(image_size, depth_size), ToTensor(), Normalize()])
     trainset = OmniStereoDataset(args.root_dir, args.train_list, transform=transform, fov=args.fov)
 
-    # Subset demo
     subset_size = math.ceil(len(trainset)/30)
     train_subset = Subset(trainset, range(subset_size))
+
     train_loader = DataLoader(train_subset, batch_size=args.batch_size, shuffle=True)
     val_loader = DataLoader(train_subset, batch_size=1, shuffle=False)
 
-    # Training loop
-    for epoch in range(start_epoch, args.epochs):
+    for epoch in range(args.epochs):
         ave_train = train(args, model, train_loader, optimizer, writer, epoch, device)
         ave_val = validation(args, model, val_loader, writer, epoch, device)
         print(f"Epoch {epoch}: Train={ave_train:.4f}, Val={ave_val:.4f}")
         scheduler.step()
 
-        # Save checkpoint
         torch.save({
             'epoch': epoch+1,
             'state_dict': model.module.state_dict(),
             'optimizer': optimizer.state_dict(),
             'scheduler': scheduler.state_dict(),
-            'ave_loss': ave_val,
-            'ndisp': model.module.ndisp,
-            'min_depth': model.module.min_depth,
-            'output_width': model.module.w,
-            'output_height': model.module.h,
-        }, join(log_folder, f'checkpoints_{epoch}.pth'))
+        }, join(log_folder, f'checkpoint_{epoch}.pth'))
 
     writer.close()
     print("Training finished.")
