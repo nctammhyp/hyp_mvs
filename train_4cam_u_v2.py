@@ -231,7 +231,7 @@ def main():
     trainset = OmniStereoDataset(args.root_dir, args.train_list, transform=transform, fov=args.fov)
 
     # Subset demo
-    subset_size = math.ceil(len(trainset)/300)
+    subset_size = math.ceil(len(trainset)/30)
     train_subset = Subset(trainset, range(subset_size))
     train_loader = DataLoader(train_subset, batch_size=args.batch_size, shuffle=True)
     val_loader = DataLoader(train_subset, batch_size=1, shuffle=False)
