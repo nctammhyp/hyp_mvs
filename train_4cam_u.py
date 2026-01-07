@@ -54,7 +54,7 @@ parser.add_argument(
 
 parser.add_argument('--epochs', default=100, type=int)
 parser.add_argument('--pretrained', default=None)
-parser.add_argument('-b', '--batch-size', default=4, type=int)
+parser.add_argument('-b', '--batch-size', default=2, type=int)
 parser.add_argument('--min_depth', type=float, default=0.55)
 parser.add_argument('--fov', type=float, default=220)
 parser.add_argument('--ndisp', type=int, default=48)

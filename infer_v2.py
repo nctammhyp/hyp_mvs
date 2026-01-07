@@ -1,3 +1,4 @@
+import os
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
@@ -10,13 +11,13 @@ from models import OmniMVS, SphericalSweeping
 from utils import InvDepthConverter
 
 # ----------------------------
-# CONFIG
+# CONFIG (PHẢI GIỐNG TRAIN)
 # ----------------------------
 ROOT_DIR = r"F:\tmp\datasets\omnithings"
 IMG_NAME = "00015.png"
 CAM_LIST = ["cam1", "cam2", "cam3", "cam4"]
 
-CHECKPOINT = r"F:\omnimvs_pytorch\checkpoints\pretrain\checkpoint_4.pth"  # đổi path
+CHECKPOINT = r"F:\omnimvs_pytorch\checkpoints\pretrain\checkpoint_4.pth"
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 FOV = 220
@@ -28,7 +29,7 @@ OUT_W, OUT_H = 512, 256
 
 
 # ----------------------------
-# LOAD MODEL
+# LOAD MODEL (GIỐNG TRAIN)
 # ----------------------------
 def load_model():
     sweep = SphericalSweeping(
@@ -47,6 +48,8 @@ def load_model():
     )
 
     ckpt = torch.load(CHECKPOINT, map_location=DEVICE)
+
+    # checkpoint train bằng DataParallel
     model.load_state_dict(ckpt["state_dict"])
 
     model = model.to(DEVICE)
@@ -55,21 +58,19 @@ def load_model():
 
 
 # ----------------------------
-# READ IMAGES MANUALLY
+# READ RAW MULTI-CAM IMAGES
 # ----------------------------
 def read_multicam_images():
     sample = {}
-
     for cam in CAM_LIST:
         img_path = join(ROOT_DIR, cam, IMG_NAME)
-        img = load_image(img_path, gray=True)  # giống dataset
-        sample[cam] = img  # numpy (H, W)
-
+        img = load_image(img_path, gray=True)   # (H,W) numpy
+        sample[cam] = img
     return sample
 
 
 # ----------------------------
-# TRANSFORM (GIỐNG TRAIN)
+# APPLY SAME TRANSFORM AS TRAIN
 # ----------------------------
 def apply_transform(sample):
     transform = transforms.Compose([
@@ -86,19 +87,22 @@ def apply_transform(sample):
 @torch.no_grad()
 def inference(model, sample):
     batch = {}
-
     for k, v in sample.items():
         batch[k] = v.unsqueeze(0).to(DEVICE)  # (1,1,H,W)
 
-    pred = model(batch)  # (1,H,W)
+    pred = model(batch)  # (1,H,W) or (1,1,H,W)
+
+    if pred.dim() == 4 and pred.size(1) == 1:
+        pred = pred.squeeze(1)
+
     return pred
 
 
 # ----------------------------
-# VISUALIZE
+# VISUALIZATION
 # ----------------------------
 def visualize(sample, pred):
-    plt.figure(figsize=(15, 4))
+    plt.figure(figsize=(16, 4))
 
     for i, cam in enumerate(CAM_LIST):
         img = sample[cam][0].cpu().numpy()
@@ -108,8 +112,8 @@ def visualize(sample, pred):
         plt.axis("off")
 
     plt.subplot(1, 5, 5)
-    plt.imshow(pred[0].cpu().numpy(), cmap="jet")
-    plt.title("Pred InvDepth (index)")
+    plt.imshow(pred[0].cpu().numpy(), cmap="jet", vmin=0, vmax=NDISP)
+    plt.title("Pred InvDepth Index")
     plt.axis("off")
 
     plt.tight_layout()
@@ -122,13 +126,9 @@ def visualize(sample, pred):
 def main():
     model = load_model()
 
-    # read raw images
     sample = read_multicam_images()
-
-    # apply SAME transform as training
     sample = apply_transform(sample)
 
-    # inference
     pred = inference(model, sample)
 
     visualize(sample, pred)
