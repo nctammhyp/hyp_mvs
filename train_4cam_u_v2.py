@@ -97,91 +97,119 @@ def train(args, model, train_loader, optimizer, writer, epoch, device):
     converter = InvDepthConverter(args.ndisp, invd_0, invd_max)
     ndisp = model.module.ndisp
 
+    criterion = nn.CrossEntropyLoss(ignore_index=-1)
+
     model.train()
     losses = []
     pbar = tqdm(train_loader)
+
     for idx, batch in enumerate(pbar):
-        for k in batch.keys():
+        for k in batch:
             batch[k] = batch[k].to(device)
 
-        pred = model(batch)
+        # ------------------
+        # Forward
+        # ------------------
+        pred = model(batch)  # [B, ndisp, H, W]
 
-        # print(f"batchsize: {batch['cam1']}")
-        # print(f"batchsize: {batch['cam1'].size()}")
-        # print(f"pred: {pred.size()}")
+        # ------------------
+        # GT PROCESS (ANTI-NaN)
+        # ------------------
+        idepth = batch['idepth']
 
+        # remove invalid depth
+        valid_mask = torch.isfinite(idepth) & (idepth > 0)
 
+        idepth = torch.where(valid_mask, idepth, torch.zeros_like(idepth))
 
-        gt_idx = converter.invdepth_to_index(batch['idepth'])
-        loss = nn.L1Loss()(pred, gt_idx)
+        gt_idx = converter.invdepth_to_index(idepth)
+
+        # clamp index
+        gt_idx = torch.clamp(gt_idx, 0, ndisp - 1)
+
+        gt_idx = gt_idx.long().squeeze(1)  # [B,H,W]
+
+        # ------------------
+        # Loss
+        # ------------------
+        loss = criterion(pred, gt_idx)
 
         optimizer.zero_grad()
         loss.backward()
-        optimizer.step()
-        losses.append(loss.item())
 
-        pbar.set_postfix(OrderedDict(epoch=f"{epoch}", loss=f"{losses[-1]:.4f}"))
+        # GRADIENT CLIP (RẤT QUAN TRỌNG)
+        torch.nn.utils.clip_grad_norm_(model.parameters(), 5.0)
+
+        optimizer.step()
+
+        losses.append(loss.item())
+        pbar.set_postfix(epoch=epoch, loss=f"{loss.item():.4f}")
 
         niter = epoch * len(train_loader) + idx
         if idx % args.log_interval == 0:
             writer.add_scalar('train/loss', loss.item(), niter)
-            # --- Lưu ảnh RGB và GT thực ---
-            for cam in model.module.cam_list:
-                save_rgb_image(batch[cam][0], f"pred_train/train_epoch{epoch}_idx{idx}_{cam}.png")
-            save_depth_as_colormap(batch['idepth'][0:1], f"pred_train/train_epoch{epoch}_idx{idx}_gt.png", vmin=0.0, vmax=None)
-            save_depth_as_colormap(pred[0:1], f"pred_train/train_epoch{epoch}_idx{idx}_pred.png", vmin=0, vmax=ndisp)
 
-    ave_loss = sum(losses)/len(losses)
+    ave_loss = sum(losses) / len(losses)
     writer.add_scalar('train/loss_ave', ave_loss, epoch)
     return ave_loss
+
 
 # ----------------------------
 # VALIDATION LOOP
 # ----------------------------
 def validation(args, model, val_loader, writer, epoch, device, save_dir='./val_results'):
     os.makedirs(save_dir, exist_ok=True)
-    model.eval()
+
     invd_0, invd_max = model.module.inv_depths[0], model.module.inv_depths[-1]
     converter = InvDepthConverter(args.ndisp, invd_0, invd_max)
     ndisp = model.module.ndisp
 
-    preds, gts, losses = [], [], []
+    criterion = nn.CrossEntropyLoss(ignore_index=-1)
+
+    model.eval()
+    losses = []
+    preds, gts = [], []
+
     pbar = tqdm(val_loader)
-    for idx, batch in enumerate(pbar):
-        with torch.no_grad():
-            for k in batch.keys():
+    with torch.no_grad():
+        for idx, batch in enumerate(pbar):
+            for k in batch:
                 batch[k] = batch[k].to(device)
 
             pred = model(batch)
-            gt_idx = converter.invdepth_to_index(batch['idepth'])
-            loss = nn.L1Loss()(pred, gt_idx)
+
+            idepth = batch['idepth']
+            valid_mask = torch.isfinite(idepth) & (idepth > 0)
+            idepth = torch.where(valid_mask, idepth, torch.zeros_like(idepth))
+
+            gt_idx = converter.invdepth_to_index(idepth)
+            gt_idx = torch.clamp(gt_idx, 0, ndisp - 1)
+            gt_idx = gt_idx.long().squeeze(1)
+
+            loss = criterion(pred, gt_idx)
+
             losses.append(loss.item())
             preds.append(pred.cpu())
             gts.append(gt_idx.cpu())
 
-            # Lưu ảnh RGB
-            for cam in model.module.cam_list:
-                save_rgb_image(batch[cam][0], join(save_dir, f'epoch{epoch}_idx{idx}_{cam}.png'))
-            # Lưu ảnh depth
-            save_depth_as_colormap(pred[0:1], join(save_dir, f'epoch{epoch}_idx{idx}_pred.png'), vmin=0, vmax=ndisp)
-            # **Sửa lỗi GT: dùng batch['idepth'] thay vì gt_idx**
-            save_depth_as_colormap(batch['idepth'][0:1], join(save_dir, f'epoch{epoch}_idx{idx}_gt.png'), vmin=0.0, vmax=None)
+            pbar.set_postfix(epoch=epoch, loss=f"{loss.item():.4f}")
 
-        pbar.set_postfix(OrderedDict(epoch=f"{epoch}", loss=f"{losses[-1]:.4f}"))
-        niter = epoch * len(val_loader) + idx
-        if idx % args.log_interval == 0:
-            writer.add_scalar('val/loss', loss.item(), niter)
+            niter = epoch * len(val_loader) + idx
+            if idx % args.log_interval == 0:
+                writer.add_scalar('val/loss', loss.item(), niter)
 
-    # Metrics
+    ave_loss = sum(losses) / len(losses)
+    writer.add_scalar('val/loss_ave', ave_loss, epoch)
+
     preds = torch.cat(preds)
     gts = torch.cat(gts)
     errors, names = evaluation_metrics(preds, gts, args.ndisp)
+
     for name, val in zip(names, errors):
         writer.add_scalar(f'val_metrics/{name}', val, epoch)
 
-    ave_loss = sum(losses)/len(losses)
-    writer.add_scalar('val/loss_ave', ave_loss, epoch)
     return ave_loss
+
 
 # ----------------------------
 # MAIN
@@ -202,7 +230,13 @@ def main():
             pool.submit(sweep.get_grid, i, d)
     pool.shutdown()
 
-    optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum)
+    # optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum)
+    optimizer = torch.optim.AdamW(
+        model.parameters(),
+        lr=1e-4,
+        weight_decay=1e-4
+    )
+
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=2*args.epochs//3, gamma=0.1)
 
     # Load pretrained
