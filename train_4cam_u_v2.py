@@ -63,7 +63,7 @@ parser.add_argument('--input_width', type=int, default=500)
 parser.add_argument('--input_height', type=int, default=480)
 parser.add_argument('--output_width', type=int, default=512)
 parser.add_argument('--output_height', type=int, default=256)
-parser.add_argument('--lr', default=0.002, type=float)
+parser.add_argument('--lr', default=3e-4, type=float)
 parser.add_argument('--momentum', default=0.9, type=float)
 parser.add_argument('--arch', default='omni_small')
 parser.add_argument('--log-interval', default=5, type=int)
@@ -97,128 +97,91 @@ def train(args, model, train_loader, optimizer, writer, epoch, device):
     converter = InvDepthConverter(args.ndisp, invd_0, invd_max)
     ndisp = model.module.ndisp
 
-    criterion = nn.L1Loss()
-
     model.train()
     losses = []
     pbar = tqdm(train_loader)
-
     for idx, batch in enumerate(pbar):
-        for k in batch:
+        for k in batch.keys():
             batch[k] = batch[k].to(device)
 
-        # ------------------
-        # Forward
-        # ------------------
-        pred = model(batch)   # [B,1,H,W] hoặc [B,H,W]
+        pred = model(batch)
 
-        # ------------------
-        # GT xử lý chống NaN
-        # ------------------
-        idepth = batch['idepth']
+        # print(f"batchsize: {batch['cam1']}")
+        # print(f"batchsize: {batch['cam1'].size()}")
+        # print(f"pred: {pred.size()}")
 
-        valid_mask = torch.isfinite(idepth) & (idepth > 0)
-        idepth = torch.where(valid_mask, idepth, torch.zeros_like(idepth))
 
-        gt_idx = converter.invdepth_to_index(idepth)
-        gt_idx = torch.clamp(gt_idx, 0, ndisp - 1)
 
-        # ------------------
-        # Shape đồng bộ
-        # ------------------
-        if pred.dim() == 4 and pred.size(1) == 1:
-            pred = pred.squeeze(1)
-
-        if gt_idx.dim() == 4 and gt_idx.size(1) == 1:
-            gt_idx = gt_idx.squeeze(1)
-
-        # ------------------
-        # Loss
-        # ------------------
-        loss = criterion(pred, gt_idx)
+        gt_idx = converter.invdepth_to_index(batch['idepth'])
+        loss = nn.L1Loss()(pred, gt_idx)
 
         optimizer.zero_grad()
         loss.backward()
-
-        # CLIP GRAD (RẤT QUAN TRỌNG)
-        # torch.nn.utils.clip_grad_norm_(model.parameters(), 5.0)
-
         optimizer.step()
-
         losses.append(loss.item())
-        pbar.set_postfix(epoch=epoch, loss=f"{loss.item():.4f}")
+
+        pbar.set_postfix(OrderedDict(epoch=f"{epoch}", loss=f"{losses[-1]:.4f}"))
 
         niter = epoch * len(train_loader) + idx
         if idx % args.log_interval == 0:
             writer.add_scalar('train/loss', loss.item(), niter)
+            # --- Lưu ảnh RGB và GT thực ---
+            for cam in model.module.cam_list:
+                save_rgb_image(batch[cam][0], f"pred_train/train_epoch{epoch}_idx{idx}_{cam}.png")
+            save_depth_as_colormap(batch['idepth'][0:1], f"pred_train/train_epoch{epoch}_idx{idx}_gt.png", vmin=0.0, vmax=None)
+            save_depth_as_colormap(pred[0:1], f"pred_train/train_epoch{epoch}_idx{idx}_pred.png", vmin=0, vmax=ndisp)
 
-    ave_loss = sum(losses) / len(losses)
+    ave_loss = sum(losses)/len(losses)
     writer.add_scalar('train/loss_ave', ave_loss, epoch)
     return ave_loss
-
-
 
 # ----------------------------
 # VALIDATION LOOP
 # ----------------------------
 def validation(args, model, val_loader, writer, epoch, device, save_dir='./val_results'):
     os.makedirs(save_dir, exist_ok=True)
-
+    model.eval()
     invd_0, invd_max = model.module.inv_depths[0], model.module.inv_depths[-1]
     converter = InvDepthConverter(args.ndisp, invd_0, invd_max)
     ndisp = model.module.ndisp
 
-    criterion = nn.L1Loss()
-
-    model.eval()
-    losses = []
-    preds, gts = [], []
-
+    preds, gts, losses = [], [], []
     pbar = tqdm(val_loader)
-    with torch.no_grad():
-        for idx, batch in enumerate(pbar):
-            for k in batch:
+    for idx, batch in enumerate(pbar):
+        with torch.no_grad():
+            for k in batch.keys():
                 batch[k] = batch[k].to(device)
 
             pred = model(batch)
-
-            idepth = batch['idepth']
-            valid_mask = torch.isfinite(idepth) & (idepth > 0)
-            idepth = torch.where(valid_mask, idepth, torch.zeros_like(idepth))
-
-            gt_idx = converter.invdepth_to_index(idepth)
-            gt_idx = torch.clamp(gt_idx, 0, ndisp - 1)
-
-            if pred.dim() == 4 and pred.size(1) == 1:
-                pred = pred.squeeze(1)
-            if gt_idx.dim() == 4 and gt_idx.size(1) == 1:
-                gt_idx = gt_idx.squeeze(1)
-
-            loss = criterion(pred, gt_idx)
-
+            gt_idx = converter.invdepth_to_index(batch['idepth'])
+            loss = nn.L1Loss()(pred, gt_idx)
             losses.append(loss.item())
             preds.append(pred.cpu())
             gts.append(gt_idx.cpu())
 
-            pbar.set_postfix(epoch=epoch, loss=f"{loss.item():.4f}")
+            # Lưu ảnh RGB
+            for cam in model.module.cam_list:
+                save_rgb_image(batch[cam][0], join(save_dir, f'epoch{epoch}_idx{idx}_{cam}.png'))
+            # Lưu ảnh depth
+            save_depth_as_colormap(pred[0:1], join(save_dir, f'epoch{epoch}_idx{idx}_pred.png'), vmin=0, vmax=ndisp)
+            # **Sửa lỗi GT: dùng batch['idepth'] thay vì gt_idx**
+            save_depth_as_colormap(batch['idepth'][0:1], join(save_dir, f'epoch{epoch}_idx{idx}_gt.png'), vmin=0.0, vmax=None)
 
-            niter = epoch * len(val_loader) + idx
-            if idx % args.log_interval == 0:
-                writer.add_scalar('val/loss', loss.item(), niter)
+        pbar.set_postfix(OrderedDict(epoch=f"{epoch}", loss=f"{losses[-1]:.4f}"))
+        niter = epoch * len(val_loader) + idx
+        if idx % args.log_interval == 0:
+            writer.add_scalar('val/loss', loss.item(), niter)
 
-    ave_loss = sum(losses) / len(losses)
-    writer.add_scalar('val/loss_ave', ave_loss, epoch)
-
+    # Metrics
     preds = torch.cat(preds)
     gts = torch.cat(gts)
     errors, names = evaluation_metrics(preds, gts, args.ndisp)
-
     for name, val in zip(names, errors):
         writer.add_scalar(f'val_metrics/{name}', val, epoch)
 
+    ave_loss = sum(losses)/len(losses)
+    writer.add_scalar('val/loss_ave', ave_loss, epoch)
     return ave_loss
-
-
 
 # ----------------------------
 # MAIN
@@ -239,13 +202,7 @@ def main():
             pool.submit(sweep.get_grid, i, d)
     pool.shutdown()
 
-    # optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum)
-    optimizer = torch.optim.AdamW(
-        model.parameters(),
-        lr=1e-4,
-        weight_decay=1e-4
-    )
-
+    optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=2*args.epochs//3, gamma=0.1)
 
     # Load pretrained
@@ -274,7 +231,7 @@ def main():
     trainset = OmniStereoDataset(args.root_dir, args.train_list, transform=transform, fov=args.fov)
 
     # Subset demo
-    subset_size = math.ceil(len(trainset)/30)
+    subset_size = math.ceil(len(trainset)/300)
     train_subset = Subset(trainset, range(subset_size))
     train_loader = DataLoader(train_subset, batch_size=args.batch_size, shuffle=True)
     val_loader = DataLoader(train_subset, batch_size=1, shuffle=False)
