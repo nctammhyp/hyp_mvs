@@ -97,7 +97,7 @@ def train(args, model, train_loader, optimizer, writer, epoch, device):
     converter = InvDepthConverter(args.ndisp, invd_0, invd_max)
     ndisp = model.module.ndisp
 
-    criterion = nn.CrossEntropyLoss(ignore_index=-1)
+    criterion = nn.L1Loss()
 
     model.train()
     losses = []
@@ -110,24 +110,27 @@ def train(args, model, train_loader, optimizer, writer, epoch, device):
         # ------------------
         # Forward
         # ------------------
-        pred = model(batch)  # [B, ndisp, H, W]
+        pred = model(batch)   # [B,1,H,W] hoặc [B,H,W]
 
         # ------------------
-        # GT PROCESS (ANTI-NaN)
+        # GT xử lý chống NaN
         # ------------------
         idepth = batch['idepth']
 
-        # remove invalid depth
         valid_mask = torch.isfinite(idepth) & (idepth > 0)
-
         idepth = torch.where(valid_mask, idepth, torch.zeros_like(idepth))
 
         gt_idx = converter.invdepth_to_index(idepth)
-
-        # clamp index
         gt_idx = torch.clamp(gt_idx, 0, ndisp - 1)
 
-        gt_idx = gt_idx.long().squeeze(1)  # [B,H,W]
+        # ------------------
+        # Shape đồng bộ
+        # ------------------
+        if pred.dim() == 4 and pred.size(1) == 1:
+            pred = pred.squeeze(1)
+
+        if gt_idx.dim() == 4 and gt_idx.size(1) == 1:
+            gt_idx = gt_idx.squeeze(1)
 
         # ------------------
         # Loss
@@ -137,7 +140,7 @@ def train(args, model, train_loader, optimizer, writer, epoch, device):
         optimizer.zero_grad()
         loss.backward()
 
-        # GRADIENT CLIP (RẤT QUAN TRỌNG)
+        # CLIP GRAD (RẤT QUAN TRỌNG)
         torch.nn.utils.clip_grad_norm_(model.parameters(), 5.0)
 
         optimizer.step()
@@ -154,6 +157,7 @@ def train(args, model, train_loader, optimizer, writer, epoch, device):
     return ave_loss
 
 
+
 # ----------------------------
 # VALIDATION LOOP
 # ----------------------------
@@ -164,7 +168,7 @@ def validation(args, model, val_loader, writer, epoch, device, save_dir='./val_r
     converter = InvDepthConverter(args.ndisp, invd_0, invd_max)
     ndisp = model.module.ndisp
 
-    criterion = nn.CrossEntropyLoss(ignore_index=-1)
+    criterion = nn.L1Loss()
 
     model.eval()
     losses = []
@@ -184,7 +188,11 @@ def validation(args, model, val_loader, writer, epoch, device, save_dir='./val_r
 
             gt_idx = converter.invdepth_to_index(idepth)
             gt_idx = torch.clamp(gt_idx, 0, ndisp - 1)
-            gt_idx = gt_idx.long().squeeze(1)
+
+            if pred.dim() == 4 and pred.size(1) == 1:
+                pred = pred.squeeze(1)
+            if gt_idx.dim() == 4 and gt_idx.size(1) == 1:
+                gt_idx = gt_idx.squeeze(1)
 
             loss = criterion(pred, gt_idx)
 
@@ -209,6 +217,7 @@ def validation(args, model, val_loader, writer, epoch, device, save_dir='./val_r
         writer.add_scalar(f'val_metrics/{name}', val, epoch)
 
     return ave_loss
+
 
 
 # ----------------------------
