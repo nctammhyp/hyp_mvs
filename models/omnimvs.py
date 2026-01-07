@@ -37,8 +37,8 @@ class OmniMVS(nn.Module):
     def forward(self, batch):
         # randomly permuted concatenate
         cam_idxs = list(range(len(self.cam_list)))
-        if self.training:
-            random.shuffle(cam_idxs)
+        # if self.training:
+        #     random.shuffle(cam_idxs)
         device = batch[self.cam_list[0]].device
         dtype = batch[self.cam_list[0]].dtype
         batch_size = batch[self.cam_list[0]].size(0)
