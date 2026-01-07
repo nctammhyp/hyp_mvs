@@ -12,7 +12,7 @@ from utils import InvDepthConverter
 # ----------------------------
 ROOT_DIR = r"F:\tmp\datasets\omnithings"
 LIST_FILE = r".\dataloader\omnithings_val.txt"
-CHECKPOINT = r"F:\omnimvs_pytorch\checkpoints\pretrain\checkpoints_1.pth"  # đổi path
+CHECKPOINT = r"F:\omnimvs_pytorch\checkpoints\pretrain\checkpoints_23.pth"  # đổi path
 
 FOV = 220
 NDISP = 48

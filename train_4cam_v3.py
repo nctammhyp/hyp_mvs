@@ -238,9 +238,9 @@ def main():
     pool.shutdown()
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4, weight_decay=1e-4)
-    scheduler = torch.optim.lr_scheduler.StepLR(
-        optimizer, step_size=2*args.epochs//3, gamma=0.1
-    )
+    # scheduler = torch.optim.lr_scheduler.StepLR(
+    #     optimizer, step_size=2*args.epochs//3, gamma=0.1
+    # )
 
     model = nn.DataParallel(model)
 
@@ -264,13 +264,13 @@ def main():
         ave_train = train(args, model, train_loader, optimizer, writer, epoch, device)
         ave_val = validation(args, model, val_loader, writer, epoch, device)
         print(f"Epoch {epoch}: Train={ave_train:.4f}, Val={ave_val:.4f}")
-        scheduler.step()
+        # scheduler.step()
 
         torch.save({
             'epoch': epoch+1,
             'state_dict': model.module.state_dict(),
             'optimizer': optimizer.state_dict(),
-            'scheduler': scheduler.state_dict(),
+            # 'scheduler': scheduler.state_dict(),
         }, join(log_folder, f'checkpoint_{epoch}.pth'))
 
     writer.close()
