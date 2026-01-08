@@ -111,7 +111,6 @@ class OmniMVSNet(nn.Module):
     def __init__(self, varargin=None):
         super().__init__()
 
-        # đảm bảo opts luôn có CH, num_invdepth, use_rgb
         if varargin is None:
             self.opts = Edict()
         elif isinstance(varargin, dict):
@@ -121,10 +120,10 @@ class OmniMVSNet(nn.Module):
         else:
             raise TypeError("varargin must be dict or EasyDict or None")
 
-        # gán mặc định nếu chưa có
-        self.opts.setdefault('CH', 32)
-        self.opts.setdefault('num_invdepth', 192)
-        self.opts.setdefault('use_rgb', False)
+        # gán mặc định cho attribute để có self.opts.CH,...
+        self.opts.CH = self.opts.get('CH', 32)
+        self.opts.num_invdepth = self.opts.get('num_invdepth', 192)
+        self.opts.use_rgb = self.opts.get('use_rgb', False)
 
         self.feature_layers = FeatureLayers(self.opts.CH, self.opts.use_rgb)
         self.spherical_sweep = SphericalSweep(self.opts.CH)
@@ -134,6 +133,7 @@ class OmniMVSNet(nn.Module):
             "disps",
             torch.arange(0, self.opts.num_invdepth).view(1, -1, 1, 1).float()
         )
+
 
     def forward(self, imgs, grids, upsample=False, out_cost=False):
         feats = [self.feature_layers(x) for x in imgs]
