@@ -1,6 +1,7 @@
 import torch
 import matplotlib.pyplot as plt
 from torchvision import transforms
+from torch.utils.data import DataLoader, Subset
 
 from dataloader import OmniStereoDataset
 from dataloader.custom_transforms import Resize, ToTensor, Normalize
@@ -12,7 +13,7 @@ from utils import InvDepthConverter
 # ----------------------------
 ROOT_DIR = r"F:\tmp\datasets\omnithings"
 LIST_FILE = r".\dataloader\omnithings_val.txt"
-CHECKPOINT = r"F:\omnimvs_pytorch\checkpoints\pretrain\checkpoint_60.pth"
+CHECKPOINT = r"F:\omnimvs_pytorch\checkpoints\pretrain\model_epoch3.pth"
 
 FOV = 220
 NDISP = 48
@@ -43,9 +44,22 @@ def load_model():
         w=OUT_W
     )
 
+    # load checkpoint
     ckpt = torch.load(CHECKPOINT, map_location=DEVICE)
-    model.load_state_dict(ckpt["state_dict"])
 
+    # nếu checkpoint lưu state_dict trực tiếp:
+    if "state_dict" in ckpt:
+        state_dict = ckpt["state_dict"]
+    else:
+        state_dict = ckpt
+
+    # handle DataParallel prefix
+    new_state_dict = {}
+    for k, v in state_dict.items():
+        name = k.replace('module.', '')  # remove 'module.' nếu có
+        new_state_dict[name] = v
+
+    model.load_state_dict(new_state_dict)
     model = model.to(DEVICE)
     model.eval()
     return model
@@ -59,7 +73,7 @@ def visualize(batch, pred_depth, cam_list):
 
     # show input images
     for i, cam in enumerate(cam_list):
-        img = batch[cam][0, 0].cpu().numpy()  # [1,1,H,W] -> [H,W]
+        img = batch[cam][0, 0].cpu().numpy()
         plt.subplot(1, len(cam_list) + 1, i + 1)
         plt.imshow(img, cmap="gray")
         plt.title(cam)
@@ -67,17 +81,19 @@ def visualize(batch, pred_depth, cam_list):
 
     # show predicted depth
     plt.subplot(1, len(cam_list) + 1, len(cam_list) + 1)
-    plt.imshow(
-        pred_depth[0].cpu().numpy(),
-        cmap="jet",
-        vmin=0.5,
-        vmax=10.0
-    )
+    depth_img = pred_depth[0].cpu().numpy()
+    
+    # dùng min/max của ảnh depth để normalize
+    vmin, vmax = depth_img.min(), depth_img.max()
+    im = plt.imshow(depth_img, cmap="jet", vmin=vmin, vmax=vmax)
     plt.title("Pred Depth (meters)")
     plt.axis("off")
+    plt.colorbar(im, fraction=0.046, pad=0.04)
 
     plt.tight_layout()
     plt.show()
+
+
 
 
 # ----------------------------
@@ -98,13 +114,15 @@ def main():
         fov=FOV
     )
 
-    # pick one sample
+    # pick one sample for quick test
     idx = 100
-    loader = torch.utils.data.DataLoader(
-        dataset,
+    subset_dataset = Subset(dataset, [idx])
+    loader = DataLoader(
+        subset_dataset,
         batch_size=1,
         shuffle=False,
-        sampler=[idx]
+        num_workers=0,
+        pin_memory=True
     )
 
     batch = next(iter(loader))
@@ -118,7 +136,7 @@ def main():
 
     # ---------------- INFERENCE ----------------
     with torch.no_grad():
-        pred_idx = model(batch)   # [B, H, W] disparity index
+        pred_idx = model(batch)  # [B, H, W] disparity index
 
     # -------- index -> depth --------
     invd_0 = model.inv_depths[0]
@@ -135,10 +153,11 @@ def main():
 
     # debug: check collapse
     print(
-        "pred_idx stats:",
-        pred_idx.min().item(),
-        pred_idx.max().item(),
-        pred_idx.mean().item()
+        "pred_idx stats: min={:.4f}, max={:.4f}, mean={:.4f}".format(
+            pred_idx.min().item(),
+            pred_idx.max().item(),
+            pred_idx.mean().item()
+        )
     )
 
     # visualize
