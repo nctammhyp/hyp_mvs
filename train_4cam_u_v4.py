@@ -49,6 +49,19 @@ parser.add_argument('--lr', default=3e-4, type=float)
 parser.add_argument('--log-interval', default=20, type=int)
 
 # ----------------------------
+# UTILS
+# ----------------------------
+def save_depth_as_colormap(depth, path, vmin=None, vmax=None):
+    """Lưu depth map dưới dạng colormap"""
+    depth = depth.detach().squeeze().cpu().numpy()
+    if vmin is None: vmin = depth.min()
+    if vmax is None: vmax = depth.max()
+    normed = (depth - vmin) / (vmax - vmin + 1e-8)
+    cmap = plt.get_cmap('jet')(normed)[:, :, :3]
+    cmap = (cmap * 255).astype(np.uint8)
+    plt.imsave(path, cmap)
+
+# ----------------------------
 # TRAIN LOOP
 # ----------------------------
 def train(args, model, loader, optimizer, writer, epoch, device):
@@ -65,26 +78,35 @@ def train(args, model, loader, optimizer, writer, epoch, device):
         for k in batch:
             batch[k] = batch[k].to(device)
 
-        pred_idx = model(batch)
+        # ----------------------------
+        # Forward
+        # ----------------------------
+        pred_idx = model(batch)  # shape [B, C, H, W] (index)
         gt_idx = converter.invdepth_to_index(batch['idepth'])
 
+        # Mask invalid depth
         valid = batch['idepth'] > 0
         loss = (torch.abs(pred_idx - gt_idx) * valid).sum() / valid.sum()
 
+        # ----------------------------
+        # Backward
+        # ----------------------------
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
 
         losses.append(loss.item())
-        pbar.set_postfix(loss=f"{loss.item():.4f}")
 
+        # ----------------------------
+        # Logging
+        # ----------------------------
+        pbar.set_postfix(loss=f"{loss.item():.4f}")
         if i % args.log_interval == 0:
             writer.add_scalar("train/loss", loss.item(), epoch * len(loader) + i)
             print(
-                "TRAIN pred_idx:",
-                f"min={pred_idx.min().item():.2f}",
-                f"max={pred_idx.max().item():.2f}",
-                f"mean={pred_idx.mean().item():.2f}",
+                f"TRAIN pred_idx: min={pred_idx.min().item():.2f} "
+                f"max={pred_idx.max().item():.2f} "
+                f"mean={pred_idx.mean().item():.2f}"
             )
 
     return sum(losses) / len(losses)
@@ -98,7 +120,7 @@ def main():
     cudnn.benchmark = True
 
     # ----------------------------
-    # MODEL (FIX H/W)
+    # MODEL (H/W đúng)
     # ----------------------------
     sweep = SphericalSweeping(
         args.root_dir,
@@ -118,7 +140,7 @@ def main():
     model = nn.DataParallel(model).to(device)
 
     # ----------------------------
-    # OPTIMIZER
+    # OPTIMIZER (Adam chống collapse)
     # ----------------------------
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 
@@ -126,10 +148,8 @@ def main():
     # DATA
     # ----------------------------
     transform = transforms.Compose([
-        Resize(
-            (args.input_width, args.input_height),
-            (args.output_width, args.output_height)
-        ),
+        Resize((args.input_width, args.input_height),
+               (args.output_width, args.output_height)),
         ToTensor(),
         Normalize()
     ])
@@ -141,7 +161,8 @@ def main():
         fov=args.fov
     )
 
-    subset_size = len(dataset) // 20  # <<< QUAN TRỌNG
+    # Subset đủ lớn
+    subset_size = len(dataset) // 20
     dataset = Subset(dataset, range(subset_size))
 
     loader = DataLoader(
@@ -164,8 +185,9 @@ def main():
     # ----------------------------
     for epoch in range(args.epochs):
         loss = train(args, model, loader, optimizer, writer, epoch, device)
-        print(f"[Epoch {epoch}] loss = {loss:.4f}")
+        print(f"[Epoch {epoch}] train_loss = {loss:.4f}")
 
+        # Save checkpoint
         torch.save(
             model.module.state_dict(),
             join(logdir, f"model_epoch{epoch}.pth")
