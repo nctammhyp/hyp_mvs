@@ -101,8 +101,8 @@ class OmniMVSNet(nn.Module):
     def __init__(self, varargin=None):
         super().__init__()
         self.opts = Edict(varargin) if varargin else Edict()
-        self.opts.CH = getattr(self.opts, 'CH', 16)
-        self.opts.num_invdepth = getattr(self.opts, 'num_invdepth', 48)
+        self.opts.CH = getattr(self.opts, 'CH', 8)
+        self.opts.num_invdepth = getattr(self.opts, 'num_invdepth', 16)
         self.opts.use_rgb = getattr(self.opts, 'use_rgb', False)
 
         self.feature_layers = FeatureLayers(self.opts.CH, self.opts.use_rgb)
