@@ -114,21 +114,20 @@ class OmniMVSNet(nn.Module):
     def forward(self, imgs, grids, upsample=False, out_cost=False):
         feats = [self.feature_layers(x) for x in imgs]
         spherical_feats_list = [self.spherical_sweep(feats[i], grids) for i in range(len(imgs))]
-        # concat theo channel → CH * num_views
-        spherical_feats = torch.cat(spherical_feats_list, dim=1)
+        spherical_feats = torch.cat(spherical_feats_list, dim=0)  # [B*C, D, H, W]
         costs = self.cost_computes(spherical_feats)
 
-        if upsample:
-            costs = F.interpolate(costs.squeeze(1), scale_factor=2, mode='bilinear', align_corners=True)
-        else:
-            costs = costs.squeeze(1)
-
+        costs = costs.squeeze(1)  # [B, D, H, W]
         prob = F.softmax(costs, dim=1)
-        # resize disps nếu cần match với CH
-        if prob.shape[1] != self.disps.shape[1]:
-            disps = F.interpolate(self.disps, size=prob.shape[1], mode='nearest')
-        else:
-            disps = self.disps
+
+        # upsample if needed
+        if upsample:
+            prob = F.interpolate(prob, scale_factor=2, mode='bilinear', align_corners=True)
+
+        # broadcast disps to match H/W
+        disps = self.disps
+        if disps.shape[2] != prob.shape[2] or disps.shape[3] != prob.shape[3]:
+            disps = F.interpolate(disps, size=prob.shape[2:], mode='nearest')
 
         disp = torch.sum(prob * disps, dim=1)
 
