@@ -65,31 +65,29 @@ optimizer = optim.Adam(net.parameters(), lr=LR)
 # =========================
 # TRAIN LOOP
 # =========================
+from torch.cuda.amp import autocast, GradScaler
+from tqdm import tqdm
+import time
+
+scaler = GradScaler()  # cho mixed precision
+
 for epoch in range(NUM_EPOCHS):
     LOG_INFO(f'===== Epoch {epoch+1}/{NUM_EPOCHS} =====')
     epoch_loss = 0.0
     tic_epoch = time.time()
 
-    for batch_idx, (imgs, gt, valid, *rest) in enumerate(train_loader):
-        # imgs: list of 4 tensors [B, C, H, W]
-        # gt: [B, H, W]
-        # valid: [B, H, W] boolean mask
-
+    # tqdm để thấy tiến trình batch
+    for batch_idx, (imgs, gt, valid, *rest) in enumerate(tqdm(train_loader, desc=f"Epoch {epoch+1}")):
         # Move to device
         imgs = [img.to(DEVICE).float() for img in imgs]
-        gt = gt.to(DEVICE).long()  # cross_entropy expects long labels
+        gt = gt.to(DEVICE).long()
         valid = valid.to(DEVICE)
 
         optimizer.zero_grad()
 
-        # Forward pass
-        with torch.set_grad_enabled(True):
+        with autocast():  # mixed precision
             invdepth_idx, prob, _ = net(imgs, train_dataset.grids, out_cost=True)
 
-            # invdepth_idx: [B, H, W] predicted indices
-            # prob: [B, D, H, W] probabilities over inverse depth bins
-
-            # Mask invalid pixels
             mask = valid
             prob_flat = prob.permute(0,2,3,1)[mask]  # [N, D]
             gt_flat = gt[mask]  # [N]
@@ -99,16 +97,19 @@ for epoch in range(NUM_EPOCHS):
 
             loss = criterion(prob_flat, gt_flat)
 
-            loss.backward()
-            optimizer.step()
+        scaler.scale(loss).backward()
+        scaler.step(optimizer)
+        scaler.update()
 
-            epoch_loss += loss.item()
+        epoch_loss += loss.item()
 
         if batch_idx % 5 == 0:
             LOG_INFO(f'Batch {batch_idx} | Loss: {loss.item():.4f}')
 
     toc_epoch = time.time() - tic_epoch
-    LOG_INFO(f'Epoch {epoch+1} finished | Avg Loss: {epoch_loss/len(train_loader):.4f} | Time: {toc_epoch:.2f}s')
+    avg_loss = epoch_loss / len(train_loader)
+    LOG_INFO(f'Epoch {epoch+1} finished | Avg Loss: {avg_loss:.4f} | Time: {toc_epoch:.2f}s')
+
 
 # =========================
 # SAVE MODEL
