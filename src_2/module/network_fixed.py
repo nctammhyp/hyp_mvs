@@ -118,29 +118,27 @@ class OmniMVSNet(nn.Module):
         self.register_buffer("disps",
                              torch.arange(0, self.opts.num_invdepth).view(1, -1, 1, 1).float())
 
-    def forward(self, imgs, grids, upsample=False, out_cost=False):
-        # imgs: list of BxCxHxW tensors
-        feats = [self.feature_layers(img) for img in imgs]
+    def forward(self, feature, grids):
+        B, C, H, W = feature.shape
+        D = len(grids)
+        sweep_list = []
 
-        spherical_feats_list = [self.spherical_sweep(feats[i], grids[i]) for i in range(len(imgs))]
-        spherical_feats = torch.cat(spherical_feats_list, dim=1)  # concat channels
-        spherical_feats = spherical_feats.unsqueeze(0)  # add batch dim -> [1,C,D,H,W]
+        for d in range(D):
+            g = grids[d]
+            if not isinstance(g, torch.Tensor):
+                g = torch.from_numpy(g).float()
+            g = g.to(feature.device)
+            if g.ndim == 3:  # D,H,W,2
+                g = g.unsqueeze(0)       # [1,H,W,2]
+                g = g.expand(B, -1, -1, -1)  # [B,H,W,2]
+            sweep_list.append(F.grid_sample(feature, g, align_corners=True))
 
-        costs = self.cost_computes(spherical_feats)  # [B,1,D,H,W]
+        sweep = torch.stack(sweep_list, dim=1)  # [B,D,C,H,W]
+        B, D, C, H, W = sweep.shape
+        sweep_reshape = sweep.view(B * D, C, H, W)
+        out = self.transfer_conv(sweep_reshape)
+        _, C_out, H_out, W_out = out.shape
+        out = out.view(B, D, C_out, H_out, W_out)
+        out = out.permute(0, 2, 1, 3, 4)  # [B, C_out, D, H, W] for Conv3D
+        return out
 
-        # softmax / softargmax
-        costs = costs.squeeze(1)  # [B,D,H,W]
-        if upsample:
-            costs = F.interpolate(costs, scale_factor=2, mode='bilinear', align_corners=True)
-
-        prob = F.softmax(costs, dim=1)
-
-        disps = self.disps
-        if disps.shape[2] != prob.shape[2] or disps.shape[3] != prob.shape[3]:
-            disps = F.interpolate(disps, size=prob.shape[2:], mode='nearest')
-
-        disp = torch.sum(prob * disps, dim=1)
-
-        if out_cost:
-            return disp, prob, costs
-        return disp
