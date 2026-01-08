@@ -47,6 +47,8 @@ train_loader = DataLoader(train_subset,
                         #   pin_memory=True
                        )
 
+print("#### done dataloader  #####")
+
 # =========================
 # LOAD NETWORK
 # =========================
