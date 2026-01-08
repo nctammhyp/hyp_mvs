@@ -112,21 +112,22 @@ class CostCompute(nn.Module):
 class OmniMVSNet(nn.Module):
     def __init__(self, varargin=None):
         super().__init__()
-        # đảm bảo opts luôn có CH, num_invdepth, use_rgb
-        if varargin is None:
-            self.opts = Edict({'CH': 32, 'num_invdepth': 192, 'use_rgb': False})
-        elif isinstance(varargin, dict):
-            self.opts = Edict(varargin)
-            self.opts.setdefault('CH', 32)
-            self.opts.setdefault('num_invdepth', 192)
-            self.opts.setdefault('use_rgb', False)
-        elif isinstance(varargin, Edict):
-            self.opts = varargin
-            self.opts.setdefault('CH', 32)
-            self.opts.setdefault('num_invdepth', 192)
-            self.opts.setdefault('use_rgb', False)
-        else:
-            raise TypeError("varargin must be dict or EasyDict or None")
+        # mặc định
+        self.opts = Edict()
+        self.opts.CH = 32
+        self.opts.num_invdepth = 192
+        self.opts.use_rgb = False
+
+        # ghi đè từ dict/Edict nếu có
+        if varargin is not None:
+            if isinstance(varargin, dict):
+                for k, v in varargin.items():
+                    setattr(self.opts, k, v)
+            elif isinstance(varargin, Edict):
+                for k, v in varargin.items():
+                    setattr(self.opts, k, v)
+            else:
+                raise TypeError("varargin must be dict or EasyDict")
 
         self.feature_layers = FeatureLayers(self.opts.CH, self.opts.use_rgb)
         self.spherical_sweep = SphericalSweep(self.opts.CH)
@@ -136,6 +137,7 @@ class OmniMVSNet(nn.Module):
             "disps",
             torch.arange(0, self.opts.num_invdepth).view(1, -1, 1, 1).float()
         )
+
 
     def forward(self, imgs, grids, upsample=False, out_cost=False):
         # imgs: list of [B,C,H,W]
