@@ -115,7 +115,6 @@ class OmniMVSNet(nn.Module):
     def __init__(self, varargin=None):
         super().__init__()
 
-        # đảm bảo opts luôn có CH, num_invdepth, use_rgb
         if varargin is None:
             self.opts = Edict()
         elif isinstance(varargin, dict):
@@ -124,6 +123,15 @@ class OmniMVSNet(nn.Module):
             self.opts = varargin
         else:
             raise TypeError("varargin must be dict or EasyDict or None")
+
+        # Gán trực tiếp để chắc chắn có attribute CH
+        if not hasattr(self.opts, 'CH'):
+            self.opts.CH = 32
+        if not hasattr(self.opts, 'num_invdepth'):
+            self.opts.num_invdepth = 192
+        if not hasattr(self.opts, 'use_rgb'):
+            self.opts.use_rgb = False
+
 
         # gán mặc định nếu chưa có
         self.opts.setdefault('CH', 32)
