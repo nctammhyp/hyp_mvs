@@ -37,33 +37,25 @@ class SphericalSweep(nn.Module):
         self.transfer_conv = Conv2D(CH, CH, 3, 2, 1, bn=False, relu=False)
 
     def forward(self, feature, grids):
-        """
-        feature: [B, C, H, W]
-        grids: list of D tensors, mỗi tensor [H, W, 2] hoặc [B, H, W, 2]
-        """
         B, C, H, W = feature.shape
         D = len(grids)
         sweep_list = []
 
         for d in range(D):
             g = grids[d]
-            if isinstance(g, torch.Tensor) is False:
+            if not isinstance(g, torch.Tensor):
                 g = torch.from_numpy(g).float()
             g = g.to(feature.device)
             if g.ndim == 3:  # [H,W,2] -> [B,H,W,2]
                 g = g.unsqueeze(0).repeat(B, 1, 1, 1)
-            sweep_list.append(F.grid_sample(feature, g, align_corners=True))  # [B,C,H,W]
+            sweep_list.append(F.grid_sample(feature, g, align_corners=True))
 
-        # stack theo depth -> [B,D,C,H,W]
-        sweep = torch.stack(sweep_list, dim=1)
+        sweep = torch.stack(sweep_list, dim=1)  # [B,D,C,H,W]
 
         # reshape để Conv2d nhận 4D input
         B, D, C, H, W = sweep.shape
-        sweep_reshape = sweep.reshape(B * D, C, H, W)  # [B*D, C, H, W]
-
-        out = self.transfer_conv(sweep_reshape)  # [B*D, C, H_out, W_out]
-
-        # reshape trở lại [B, D, C, H_out, W_out]
+        sweep_reshape = sweep.reshape(B * D, C, H, W)
+        out = self.transfer_conv(sweep_reshape)
         _, C_out, H_out, W_out = out.shape
         out = out.view(B, D, C_out, H_out, W_out)
         return out
@@ -115,13 +107,11 @@ class CostCompute(nn.Module):
 # -----------------------------
 # OmniMVSNet
 # -----------------------------
-from easydict import EasyDict as Edict
-
 class OmniMVSNet(nn.Module):
     def __init__(self, varargin=None):
         super().__init__()
 
-        # đảm bảo opts là EasyDict
+        # đảm bảo opts luôn có CH, num_invdepth, use_rgb
         if varargin is None:
             self.opts = Edict()
         elif isinstance(varargin, dict):
@@ -131,7 +121,7 @@ class OmniMVSNet(nn.Module):
         else:
             raise TypeError("varargin must be dict or EasyDict or None")
 
-        # gán mặc định nếu chưa có key
+        # gán mặc định nếu chưa có
         self.opts.setdefault('CH', 32)
         self.opts.setdefault('num_invdepth', 192)
         self.opts.setdefault('use_rgb', False)
@@ -145,17 +135,10 @@ class OmniMVSNet(nn.Module):
             torch.arange(0, self.opts.num_invdepth).view(1, -1, 1, 1).float()
         )
 
-
-
     def forward(self, imgs, grids, upsample=False, out_cost=False):
-        # imgs: list of [B,C,H,W]
-        feats = [self.feature_layers(x) for x in imgs]  # list len=num_views
-        # sweep theo từng view
+        feats = [self.feature_layers(x) for x in imgs]
         spherical_feats_list = [self.spherical_sweep(feats[i], grids) for i in range(len(imgs))]
-
-        # concat view dimension -> [B,D,C,H,W]
         spherical_feats = torch.stack(spherical_feats_list, dim=0).permute(1,0,2,3,4)
-
         costs = self.cost_computes(spherical_feats)
 
         if upsample:
