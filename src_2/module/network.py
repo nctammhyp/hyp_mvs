@@ -120,14 +120,21 @@ from easydict import EasyDict as Edict
 class OmniMVSNet(nn.Module):
     def __init__(self, varargin=None):
         super().__init__()
-        # nếu varargin là dict, chuyển sang Edict để dùng .CH
-        if varargin is not None and isinstance(varargin, dict):
-            self.opts = Edict(varargin)
-        else:
+
+        # đảm bảo opts là EasyDict
+        if varargin is None:
             self.opts = Edict()
-            self.opts.CH = 32
-            self.opts.num_invdepth = 192
-            self.opts.use_rgb = False
+        elif isinstance(varargin, dict):
+            self.opts = Edict(varargin)
+        elif isinstance(varargin, Edict):
+            self.opts = varargin
+        else:
+            raise TypeError("varargin must be dict or EasyDict or None")
+
+        # gán mặc định nếu chưa có key
+        self.opts.setdefault('CH', 32)
+        self.opts.setdefault('num_invdepth', 192)
+        self.opts.setdefault('use_rgb', False)
 
         self.feature_layers = FeatureLayers(self.opts.CH, self.opts.use_rgb)
         self.spherical_sweep = SphericalSweep(self.opts.CH)
@@ -137,6 +144,7 @@ class OmniMVSNet(nn.Module):
             "disps",
             torch.arange(0, self.opts.num_invdepth).view(1, -1, 1, 1).float()
         )
+
 
 
     def forward(self, imgs, grids, upsample=False, out_cost=False):
