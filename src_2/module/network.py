@@ -25,15 +25,15 @@ class FeatureLayers(torch.nn.Module):
 
 class SphericalSweep(torch.nn.Module):
     def __init__(self, CH=32):
-        super().__init__()
-        self.transfer_conv = Conv2D(CH,CH,3,2,1,bn=False,relu=False)
+        super(SphericalSweep, self).__init__()
+        self.transfer_conv = Conv2D(CH, CH, 3, 2, 1, bn=False, relu=False)
 
     def forward(self, feature, grids):
         """
-        feature: [B,C,H,W]
-        grids: list of num_invdepth tensors, each [H,W,2] or [B,H,W,2]
+        feature: [B, C, H, W]
+        grids: list of num_invdepth tensors, mỗi tensor [H, W, 2]
         """
-        B,C,H,W = feature.shape
+        B, C, H, W = feature.shape
         D = len(grids)
         sweep_list = []
 
@@ -42,17 +42,26 @@ class SphericalSweep(torch.nn.Module):
             if isinstance(g, np.ndarray):
                 g = torch.from_numpy(g).float()
             g = g.to(feature.device)
-            if g.ndim == 3:  # [H,W,2] -> add batch
-                g = g.unsqueeze(0).repeat(B,1,1,1)
-            elif g.ndim == 4 and g.shape[0] != B:
-                g = g[:B]
-            sweep_list.append(F.grid_sample(feature, g, align_corners=True))
-        
-        sweep = torch.stack(sweep_list, dim=1)  # [B,D,C,H,W]
-        sweep = sweep.view(B*D,C,H,W)  # Conv2d needs 4D
+            if g.ndim == 3:  # [H,W,2]
+                g = g.unsqueeze(0).repeat(B,1,1,1)  # [B,H,W,2]
+
+            # grid_sample output shape: [B, C, H_out, W_out]
+            out = F.grid_sample(feature, g, align_corners=True)
+            sweep_list.append(out)
+
+        # stack theo depth -> [B, D, C, H_out, W_out]
+        sweep = torch.stack(sweep_list, dim=1)
+
+        # lấy shape thực tế
+        B, D, C, H_out, W_out = sweep.shape
+        sweep = sweep.view(B*D, C, H_out, W_out)  # Conv2d cần 4D
+
         out = self.transfer_conv(sweep)
-        out = out.view(B,D,C,H,W)
+
+        # reshape về [B, D, C, H_out, W_out] nếu cần
+        out = out.view(B, D, C, H_out, W_out)
         return out
+
 
 class CostCompute(torch.nn.Module):
     def __init__(self,CH=32):
