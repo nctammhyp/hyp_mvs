@@ -113,8 +113,10 @@ class OmniMVSNet(nn.Module):
 
     def forward(self, imgs, grids, upsample=False, out_cost=False):
         feats = [self.feature_layers(x) for x in imgs]
+        # concat theo channel (dim=1), không phải dim=0
         spherical_feats_list = [self.spherical_sweep(feats[i], grids) for i in range(len(imgs))]
-        spherical_feats = torch.cat(spherical_feats_list, dim=0)  # batch B*C,D,H,W
+        spherical_feats = torch.cat(spherical_feats_list, dim=1)  # đúng: concat channel
+
         costs = self.cost_computes(spherical_feats)
 
         if upsample:
@@ -129,3 +131,4 @@ class OmniMVSNet(nn.Module):
             return disp, prob, costs
         else:
             return disp
+
