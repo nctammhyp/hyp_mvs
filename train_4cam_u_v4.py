@@ -1,15 +1,13 @@
-import argparse, os, json, math
+import argparse, os, json
 from os.path import join
-from collections import OrderedDict
 from datetime import datetime
-from concurrent.futures import ThreadPoolExecutor
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.backends.cudnn as cudnn
-from torch.utils.data import DataLoader, Subset
+from torch.utils.data import DataLoader
 from torchvision import transforms
-from torchvision.utils import save_image
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 import matplotlib.pyplot as plt
@@ -22,7 +20,7 @@ from models import OmniMVS, SphericalSweeping
 from utils import InvDepthConverter
 
 # ----------------------------
-# SEED
+# Seed
 # ----------------------------
 torch.backends.cudnn.deterministic = True
 random.seed(42)
@@ -31,10 +29,10 @@ torch.manual_seed(42)
 torch.cuda.manual_seed_all(42)
 
 # ----------------------------
-# ARGUMENTS
+# Arguments
 # ----------------------------
 parser = argparse.ArgumentParser()
-parser.add_argument('root_dir', nargs='?', default='/home/sw-tamnguyen/Desktop/depth_project/datasets/datasets/omnithings')
+parser.add_argument('root_dir', nargs='?', default='/home/user/datasets/omnithings')
 parser.add_argument('-t', '--train-list', default='./dataloader/omnithings_train.txt')
 parser.add_argument('--epochs', default=30, type=int)
 parser.add_argument('-b', '--batch-size', default=2, type=int)
@@ -46,10 +44,10 @@ parser.add_argument('--input_height', type=int, default=480)
 parser.add_argument('--output_width', type=int, default=512)
 parser.add_argument('--output_height', type=int, default=256)
 parser.add_argument('--lr', default=3e-4, type=float)
-parser.add_argument('--log-interval', default=20, type=int)
+parser.add_argument('--log-interval', default=10, type=int)
 
 # ----------------------------
-# UTILS
+# Utils
 # ----------------------------
 def save_depth_as_colormap(depth, path, vmin=None, vmax=None):
     """Lưu depth map dưới dạng colormap"""
@@ -62,57 +60,44 @@ def save_depth_as_colormap(depth, path, vmin=None, vmax=None):
     plt.imsave(path, cmap)
 
 # ----------------------------
-# TRAIN LOOP
+# Train loop
 # ----------------------------
-def train(args, model, loader, optimizer, writer, epoch, device):
+def train_epoch(args, model, loader, optimizer, writer, epoch, device):
     model.train()
-
     invd_0 = model.module.inv_depths[0]
     invd_max = model.module.inv_depths[-1]
     converter = InvDepthConverter(args.ndisp, invd_0, invd_max)
 
     losses = []
     pbar = tqdm(loader)
-
     for i, batch in enumerate(pbar):
         for k in batch:
             batch[k] = batch[k].to(device)
 
-        # ----------------------------
-        # Forward
-        # ----------------------------
-        pred_idx = model(batch)  # shape [B, C, H, W] (index)
+        pred_idx = model(batch)
         gt_idx = converter.invdepth_to_index(batch['idepth'])
 
         # Mask invalid depth
         valid = batch['idepth'] > 0
         loss = (torch.abs(pred_idx - gt_idx) * valid).sum() / valid.sum()
 
-        # ----------------------------
-        # Backward
-        # ----------------------------
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
 
         losses.append(loss.item())
 
-        # ----------------------------
-        # Logging
-        # ----------------------------
+        # Log
         pbar.set_postfix(loss=f"{loss.item():.4f}")
         if i % args.log_interval == 0:
             writer.add_scalar("train/loss", loss.item(), epoch * len(loader) + i)
-            print(
-                f"TRAIN pred_idx: min={pred_idx.min().item():.2f} "
-                f"max={pred_idx.max().item():.2f} "
-                f"mean={pred_idx.mean().item():.2f}"
-            )
+            print(f"TRAIN pred_idx stats: min={pred_idx.min().item():.2f} "
+                  f"max={pred_idx.max().item():.2f} mean={pred_idx.mean().item():.2f}")
 
-    return sum(losses) / len(losses)
+    return sum(losses)/len(losses)
 
 # ----------------------------
-# MAIN
+# Main
 # ----------------------------
 def main():
     args = parser.parse_args()
@@ -120,78 +105,43 @@ def main():
     cudnn.benchmark = True
 
     # ----------------------------
-    # MODEL (H/W đúng)
+    # Model
     # ----------------------------
-    sweep = SphericalSweeping(
-        args.root_dir,
-        h=args.output_height,
-        w=args.output_width,
-        fov=args.fov
-    )
-
-    model = OmniMVS(
-        sweep,
-        args.ndisp,
-        args.min_depth,
-        h=args.output_height,
-        w=args.output_width
-    )
-
+    sweep = SphericalSweeping(args.root_dir, h=args.output_height, w=args.output_width, fov=args.fov)
+    model = OmniMVS(sweep, args.ndisp, args.min_depth, args.output_width, args.output_height)
     model = nn.DataParallel(model).to(device)
 
-    # ----------------------------
-    # OPTIMIZER (Adam chống collapse)
-    # ----------------------------
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 
     # ----------------------------
-    # DATA
+    # Dataset & Dataloader
     # ----------------------------
     transform = transforms.Compose([
-        Resize((args.input_width, args.input_height),
-               (args.output_width, args.output_height)),
+        Resize((args.input_width, args.input_height), (args.output_width, args.output_height)),
         ToTensor(),
         Normalize()
     ])
-
-    dataset = OmniStereoDataset(
-        args.root_dir,
-        args.train_list,
-        transform=transform,
-        fov=args.fov
-    )
-
-    # Subset đủ lớn
-    subset_size = len(dataset) // 20
-    dataset = Subset(dataset, range(subset_size))
-
-    loader = DataLoader(
-        dataset,
-        batch_size=args.batch_size,
-        shuffle=True,
-        num_workers=4,
-        pin_memory=True
-    )
+    dataset = OmniStereoDataset(args.root_dir, args.train_list, transform=transform, fov=args.fov)
+    loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=4, pin_memory=True)
 
     # ----------------------------
-    # LOG
+    # Logger
     # ----------------------------
     logdir = join("checkpoints", datetime.now().strftime("%m%d-%H%M"))
     os.makedirs(logdir, exist_ok=True)
     writer = SummaryWriter(logdir)
+    with open(join(logdir, 'args.json'), 'w') as f:
+        json.dump(vars(args), f, indent=2)
 
     # ----------------------------
-    # TRAIN
+    # Training
     # ----------------------------
     for epoch in range(args.epochs):
-        loss = train(args, model, loader, optimizer, writer, epoch, device)
-        print(f"[Epoch {epoch}] train_loss = {loss:.4f}")
+        loss = train_epoch(args, model, loader, optimizer, writer, epoch, device)
+        print(f"[Epoch {epoch}] train_loss={loss:.4f}")
 
         # Save checkpoint
-        torch.save(
-            model.module.state_dict(),
-            join(logdir, f"model_epoch{epoch}.pth")
-        )
+        torch.save(model.module.state_dict(), join(logdir, f"model_epoch{epoch}.pth"))
 
     writer.close()
     print("Training finished.")
