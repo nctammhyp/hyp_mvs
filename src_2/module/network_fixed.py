@@ -8,7 +8,7 @@ from easydict import EasyDict as Edict
 # Feature extractor
 # -----------------------------
 class FeatureLayers(nn.Module):
-    def __init__(self, CH=8, use_rgb=False):
+    def __init__(self, CH=32, use_rgb=False):
         super().__init__()
         layers = []
         in_channel = 3 if use_rgb else 1
@@ -31,43 +31,42 @@ class FeatureLayers(nn.Module):
 # Spherical Sweep
 # -----------------------------
 class SphericalSweep(nn.Module):
-    def __init__(self, CH=8):
+    def __init__(self, CH=32):
         super().__init__()
         self.transfer_conv = Conv2D(CH, CH, 3, 2, 1, bn=False, relu=False)
 
-    def forward(self, feature, grid):
-        # grid: list of D tensors [B,H,W,2] or numpy arrays
+    def forward(self, feature, grids):
         B, C, H, W = feature.shape
-        D = len(grid)
+        D = len(grids)
         sweep_list = []
 
         for d in range(D):
-            g = grid[d]
+            g = grids[d]
             if not isinstance(g, torch.Tensor):
                 g = torch.from_numpy(g).float()
             g = g.to(feature.device)
             if g.ndim == 3:
                 g = g.unsqueeze(0).repeat(B, 1, 1, 1)
+            # grid_sample yêu cầu batch_size phải giống với feature
             sweep_list.append(F.grid_sample(feature, g, align_corners=True))
 
-        sweep = torch.stack(sweep_list, dim=1)  # [B,D,C,H,W]
+        sweep = torch.stack(sweep_list, dim=1)  # [B, D, C, H, W]
         B, D, C, H, W = sweep.shape
         sweep_reshape = sweep.view(B * D, C, H, W)
         out = self.transfer_conv(sweep_reshape)
         _, C_out, H_out, W_out = out.shape
         out = out.view(B, D, C_out, H_out, W_out)
-        out = out.permute(0, 2, 1, 3, 4)  # [B, C_out, D, H, W] for Conv3D
+        out = out.permute(0, 2, 1, 3, 4)  # [B, C, D, H, W]
         return out
 
 # -----------------------------
 # Cost volume computation
 # -----------------------------
 class CostCompute(nn.Module):
-    def __init__(self, CH=8):
+    def __init__(self, CH=32):
         super().__init__()
         CH2 = CH * 2
         self.fusion = Conv3D(CH, CH, 3, 1, 1)
-
         convs = []
         convs += [Conv3D(CH, CH, 3, 1, 1) for _ in range(3)]
         convs += [Conv3D(CH, CH2, 3, 2, 1),
@@ -77,7 +76,6 @@ class CostCompute(nn.Module):
                   Conv3D(CH2, CH2, 3, 1, 1),
                   Conv3D(CH2, CH2, 3, 1, 1)]
         self.convs = nn.ModuleList(convs)
-
         self.deconv1 = DeConv3D(CH2, CH2, 3, 2, 1, out_pad=1)
         self.deconv2 = DeConv3D(CH2, CH2, 3, 2, 1, out_pad=1)
         self.deconv3 = DeConv3D(CH2, CH, 3, 2, 1, out_pad=1)
@@ -99,46 +97,30 @@ class CostCompute(nn.Module):
 # OmniMVSNet
 # -----------------------------
 class OmniMVSNet(nn.Module):
-    def __init__(self, opts=None, num_views=4):
+    def __init__(self, varargin=None):
         super().__init__()
-        self.opts = Edict()
-        self.opts.CH = 8
-        self.opts.num_invdepth = 16
-        self.opts.use_rgb = False
+        self.opts = Edict(varargin) if varargin else Edict()
+        self.opts.CH = getattr(self.opts, 'CH', 8)
+        self.opts.num_invdepth = getattr(self.opts, 'num_invdepth', 16)
+        self.opts.use_rgb = getattr(self.opts, 'use_rgb', False)
 
-        if opts:
-            self.opts.update(opts)
-
-        self.num_views = num_views
         self.feature_layers = FeatureLayers(self.opts.CH, self.opts.use_rgb)
         self.spherical_sweep = SphericalSweep(self.opts.CH)
-        self.cost_computes = CostCompute(self.opts.CH * self.num_views)
-
-        # disps buffer
+        self.cost_computes = CostCompute(self.opts.CH)
         self.register_buffer("disps",
                              torch.arange(0, self.opts.num_invdepth).view(1, -1, 1, 1).float())
 
-    def forward(self, feature, grids):
-        B, C, H, W = feature.shape
-        D = len(grids)
-        sweep_list = []
+    def forward(self, imgs, grids, upsample=False):
+        feats = [self.feature_layers(x) for x in imgs]
+        spherical_feats_list = [self.spherical_sweep(feats[i], grids[i]) for i in range(len(imgs))]
+        spherical_feats = torch.cat(spherical_feats_list, dim=0)  # batch B, C, D, H, W
+        costs = self.cost_computes(spherical_feats)
 
-        for d in range(D):
-            g = grids[d]
-            if not isinstance(g, torch.Tensor):
-                g = torch.from_numpy(g).float()
-            g = g.to(feature.device)
-            if g.ndim == 3:  # D,H,W,2
-                g = g.unsqueeze(0)       # [1,H,W,2]
-                g = g.expand(B, -1, -1, -1)  # [B,H,W,2]
-            sweep_list.append(F.grid_sample(feature, g, align_corners=True))
+        if upsample:
+            costs = F.interpolate(costs.squeeze(1), scale_factor=2, mode='bilinear', align_corners=True)
+        else:
+            costs = costs.squeeze(1)
 
-        sweep = torch.stack(sweep_list, dim=1)  # [B,D,C,H,W]
-        B, D, C, H, W = sweep.shape
-        sweep_reshape = sweep.view(B * D, C, H, W)
-        out = self.transfer_conv(sweep_reshape)
-        _, C_out, H_out, W_out = out.shape
-        out = out.view(B, D, C_out, H_out, W_out)
-        out = out.permute(0, 2, 1, 3, 4)  # [B, C_out, D, H, W] for Conv3D
-        return out
-
+        prob = F.softmax(costs, dim=1)
+        disp = torch.sum(prob * self.disps, dim=1)
+        return disp  # chỉ trả depth map
