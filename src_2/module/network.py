@@ -115,21 +115,29 @@ class CostCompute(nn.Module):
 # -----------------------------
 # OmniMVSNet
 # -----------------------------
+from easydict import EasyDict as Edict
+
 class OmniMVSNet(nn.Module):
     def __init__(self, varargin=None):
         super().__init__()
-        opts = Edict()
-        opts.CH = 32
-        opts.num_invdepth = 192
-        opts.use_rgb = False
-        self.opts = opts if varargin is None else varargin
+        # nếu varargin là dict, chuyển sang Edict để dùng .CH
+        if varargin is not None and isinstance(varargin, dict):
+            self.opts = Edict(varargin)
+        else:
+            self.opts = Edict()
+            self.opts.CH = 32
+            self.opts.num_invdepth = 192
+            self.opts.use_rgb = False
 
         self.feature_layers = FeatureLayers(self.opts.CH, self.opts.use_rgb)
         self.spherical_sweep = SphericalSweep(self.opts.CH)
         self.cost_computes = CostCompute(self.opts.CH)
 
-        # disparity tensor [1,D,1,1]
-        self.register_buffer("disps", torch.arange(0, self.opts.num_invdepth).view(1, -1, 1, 1).float())
+        self.register_buffer(
+            "disps",
+            torch.arange(0, self.opts.num_invdepth).view(1, -1, 1, 1).float()
+        )
+
 
     def forward(self, imgs, grids, upsample=False, out_cost=False):
         # imgs: list of [B,C,H,W]
