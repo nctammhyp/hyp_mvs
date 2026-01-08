@@ -11,5 +11,6 @@ checkpoints/
 sweep_result/
 val_results/
 tmp/
-src_2/
+# src_2/
 inference_results/
+src_2/data/
