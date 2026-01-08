@@ -36,14 +36,14 @@ train_dataset = Dataset(DB_NAME, db_root=DB_ROOT, train=True)
 #                           pin_memory=True)
 
 # Chọn subset: ví dụ dùng 100 frame đầu tiên
-subset_indices = list(range(20))  # hoặc np.arange(100)
+subset_indices = list(range(10))  # hoặc np.arange(100)
 train_subset = Subset(train_dataset, subset_indices)
 
 # DataLoader cho subset
 train_loader = DataLoader(train_subset,
                           batch_size=BATCH_SIZE,
                           shuffle=True,
-                          num_workers=NUM_WORKERS,
+                          num_workers=4,
                           pin_memory=True)
 
 
