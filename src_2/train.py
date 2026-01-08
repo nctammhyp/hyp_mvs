@@ -8,7 +8,9 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 
 from dataset import Dataset
-from module.network import OmniMVSNet
+# from module.network import OmniMVSNet
+from module.network_fixed import OmniMVSNet
+
 from utils.common import LOG_INFO
 from torch.utils.data import DataLoader, Subset
 
