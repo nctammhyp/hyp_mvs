@@ -137,9 +137,11 @@ class OmniMVSNet(nn.Module):
             raise TypeError("varargin must be dict or EasyDict or None")
 
         # set default values
-        self.opts.setdefault('CH', 32)
-        self.opts.setdefault('num_invdepth', 192)
-        self.opts.setdefault('use_rgb', False)
+        self.opts = Edict(varargin) if varargin else Edict()
+        self.opts.CH = getattr(self.opts, 'CH', 32)
+        self.opts.num_invdepth = getattr(self.opts, 'num_invdepth', 192)
+        self.opts.use_rgb = getattr(self.opts, 'use_rgb', False)
+
         self.num_views = num_views
 
         self.feature_layers = FeatureLayers(self.opts.CH, self.opts.use_rgb)
