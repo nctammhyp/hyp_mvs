@@ -86,20 +86,30 @@ class CostCompute(nn.Module):
 # OmniMVSNet
 # -----------------------------
 class OmniMVSNet(nn.Module):
-    def __init__(self, num_views=4, varargin=None):
+    def __init__(self, varargin=None, num_views=4):
         super().__init__()
         self.num_views = num_views
-        self.opts = Edict(varargin) if varargin else Edict()
-        self.opts.CH = getattr(self.opts, 'CH', 8)          # giảm từ 32 → 8
-        self.opts.num_invdepth = getattr(self.opts, 'num_invdepth', 16)  # giảm từ 192 → 16
+        # convert dict -> EasyDict
+        if isinstance(varargin, dict):
+            self.opts = Edict(varargin)
+        else:
+            self.opts = Edict() if varargin is None else varargin
+
+        # set defaults
+        ch = getattr(self.opts, 'CH', 8)
+        self.opts.CH = ch
+        self.opts.num_invdepth = getattr(self.opts, 'num_invdepth', 16)
         self.opts.use_rgb = getattr(self.opts, 'use_rgb', False)
 
+        # build network
         self.feature_layers = FeatureLayers(self.opts.CH, self.opts.use_rgb)
         self.spherical_sweep = SphericalSweep(self.opts.CH)
-        self.cost_computes = CostCompute(self.opts.CH * self.num_views)  # fix channel mismatch
+        self.cost_computes = CostCompute(ch * self.num_views)  # fix channel mismatch
 
-        self.register_buffer("disps",
-                             torch.arange(0, self.opts.num_invdepth).view(1, -1, 1, 1).float())
+        self.register_buffer(
+            "disps",
+            torch.arange(0, self.opts.num_invdepth).view(1, -1, 1, 1).float()
+        )
 
     def forward(self, imgs, grids, upsample=False, out_cost=False):
         feats = [self.feature_layers(x) for x in imgs]
