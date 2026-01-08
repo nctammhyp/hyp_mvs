@@ -35,20 +35,35 @@ class SphericalSweep(torch.nn.Module):
         self.transfer_conv = Conv2D(CH, CH, 3, 2, 1, bn=False, relu=False)
 
     def forward(self, feature, grids):
+        """
+        feature: [B, C, H, W]
+        grids: list of num_invdepth tensors, each [H, W, 2] hoặc [B, H, W, 2]
+        """
+        B, C, H, W = feature.shape
+        D = len(grids)
         sweep_list = []
-        num_invdepth = len(grids)
-        for d in range(num_invdepth):
+
+        for d in range(D):
             g = grids[d]
             if isinstance(g, np.ndarray):
                 g = torch.from_numpy(g).float()
             g = g.to(feature.device)
             if g.ndim == 3:  # [H,W,2]
-                g = g.unsqueeze(0)
-            g = g.repeat(feature.size(0), 1, 1, 1)  # match batch size
-            sweep_list.append(F.grid_sample(feature, g, align_corners=True))
-        sweep = torch.stack(sweep_list, dim=1)  # dim=1 = num_invdepth
+                g = g.unsqueeze(0).repeat(B,1,1,1)  # [B,H,W,2]
+            sweep_list.append(F.grid_sample(feature, g, align_corners=True))  # [B,C,H,W]
+
+        # stack theo depth -> [B, D, C, H, W]
+        sweep = torch.stack(sweep_list, dim=1)
+
+        # merge batch và depth để Conv2d nhận input 4D
+        sweep = sweep.view(B*D, C, H, W)  # [B*D, C, H, W]
+
         out = self.transfer_conv(sweep)
+
+        # reshape về [B, D, C, H, W] nếu cần
+        out = out.view(B, D, C, H, W)
         return out
+
 
 
 
