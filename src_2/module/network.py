@@ -42,7 +42,12 @@ class SphericalSweep(torch.nn.Module):
 
         for d in range(num_invdepth):
             # Chuyển numpy -> tensor float
-            g = torch.from_numpy(grid[d,...]).float().to(feature.device)
+            # g = torch.from_numpy(grid[d,...]).float().to(feature.device)
+            g = grid[d, ...]
+            if isinstance(g, np.ndarray):
+                g = torch.from_numpy(g)
+            g = g.float().to(feature.device)
+
             # replicate grid cho batch
             g = g.unsqueeze(0).repeat(batch_size,1,1,1)  # [B,H,W,2]
             sweep_list.append(F.grid_sample(feature, g, align_corners=True))
