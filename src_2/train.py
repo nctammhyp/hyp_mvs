@@ -15,7 +15,7 @@ from torch.utils.data import DataLoader, Subset
 # =========================
 # CONFIG
 # =========================
-DB_ROOT = r'/home/sw-tamnguyen/Desktop/depth_project/datasets/datasets'
+DB_ROOT = '/home/sw-tamnguyen/Desktop/depth_project/datasets/datasets'
 DB_NAME = 'omnithings'
 BATCH_SIZE = 2
 NUM_WORKERS = 0  # Windows safe
