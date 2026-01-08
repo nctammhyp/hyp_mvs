@@ -31,6 +31,7 @@ def makeSphericalRays(equirect_size: (int, int), phi_deg: float, phi2_deg=-1.0):
                            np.reshape(Z, [1, -1]))).astype(np.float64)
     return rays
 
+
 class Dataset(torch.utils.data.Dataset):
     def __init__(self, dbname: str, db_opts=None, load_lut=True, train=True, db_root='../data'):
         super().__init__()
@@ -39,7 +40,7 @@ class Dataset(torch.utils.data.Dataset):
 
         # default opts
         opts = Edict()
-        opts.img_fmt = 'cam%d/%05d.png'  # filename pattern
+        opts.img_fmt = 'cam%d/%05d.png'
         self.cam_offset = 1
         opts.lut_fmt = 'lt_(%d,%d,%d).hwd'
         opts.gt_depth_fmt = 'omnidepth_gt_%d/%05d.tiff'
@@ -99,9 +100,9 @@ class Dataset(torch.utils.data.Dataset):
 
             # convert to torch tensor, float32, [C,H,W]
             im_tensor = torch.from_numpy(img.astype(np.float32) / 255.0)
-            if im_tensor.ndim == 2:  # grayscale
+            if im_tensor.ndim == 2:
                 im_tensor = im_tensor.unsqueeze(0)
-            else:  # RGB
+            else:
                 im_tensor = im_tensor.permute(2, 0, 1)
             imgs.append(im_tensor)
 
@@ -115,6 +116,19 @@ class Dataset(torch.utils.data.Dataset):
 
         return imgs, raw_imgs
 
+    # ===========================
+    # Build spherical sweep lookup table
+    # ===========================
+    def buildLookupTable(self, shape):
+        H, W = shape
+        grids = []
+        for d in range(self.num_invdepth):
+            xs = np.linspace(-1, 1, W, dtype=np.float32)
+            ys = np.linspace(-1, 1, H, dtype=np.float32)
+            xv, yv = np.meshgrid(xs, ys)
+            grid = np.stack([xv, yv], axis=-1)  # H x W x 2
+            grids.append(torch.from_numpy(grid))
+        return grids
 
     def __initSweep(self, load_lut=True):
         h, w = self.equirect_size
@@ -136,12 +150,12 @@ class Dataset(torch.utils.data.Dataset):
             LOG_INFO('Lookup table not found: "%s"' % path)
             LOG_INFO('Build lookup table...')
             self.grids = self.buildLookupTable((h, w))
-            np.concatenate([toNumpy(g)[np.newaxis, ...] for g in self.grids], axis=0).tofile(path)
+            np.concatenate([g.unsqueeze(0).numpy() for g in self.grids], axis=0).tofile(path)
             LOG_INFO('Lookup table saved: "%s"' % path)
         else:
             LOG_INFO('Load lookup table: "%s"' % path)
-            grids = np.fromfile(path, dtype=np.float32).reshape([4, int(self.num_invdepth / 2), h, w, 2])
-            self.grids = [grids[i, ...].squeeze() for i in range(4)]
+            grids = np.fromfile(path, dtype=np.float32).reshape([self.num_invdepth, h, w, 2])
+            self.grids = [torch.from_numpy(grids[i, ...]) for i in range(self.num_invdepth)]
 
     def __len__(self):
         return len(self.train_idx) if self.train else len(self.test_idx)
