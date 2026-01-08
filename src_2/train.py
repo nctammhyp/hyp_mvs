@@ -42,11 +42,10 @@ train_subset = Subset(train_dataset, subset_indices)
 # DataLoader cho subset
 train_loader = DataLoader(train_subset,
                           batch_size=BATCH_SIZE,
-                          shuffle=True,
-                          num_workers=4,
-                          pin_memory=True)
-
-
+                        #   shuffle=True,
+                        #   num_workers=4,
+                        #   pin_memory=True
+                       )
 
 # =========================
 # LOAD NETWORK
