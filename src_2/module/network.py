@@ -35,26 +35,17 @@ class SphericalSweep(torch.nn.Module):
         self.transfer_conv = \
             Conv2D(CH,CH,3,2,1,bn=False,relu=False)
 
-    def forward(self, feature, grid):
-        num_invdepth = grid.shape[0]
+    def forward(self, feature, grids):
         sweep_list = []
-        batch_size = feature.shape[0]  # ví dụ 2
-
+        num_invdepth = len(grids)
         for d in range(num_invdepth):
-            # Chuyển numpy -> tensor float
-            # g = torch.from_numpy(grid[d,...]).float().to(feature.device)
-            g = grid[d, ...]
-            if isinstance(g, np.ndarray):
-                g = torch.from_numpy(g)
-            g = g.float().to(feature.device)
-
-            # replicate grid cho batch
-            g = g.unsqueeze(0).repeat(batch_size,1,1,1)  # [B,H,W,2]
+            g = grids[d].float().to(feature.device)
             sweep_list.append(F.grid_sample(feature, g, align_corners=True))
         
-        sweep = torch.cat(sweep_list, 0)
-        spherical_feature = self.transfer_conv(sweep)
-        return spherical_feature
+        sweep = torch.stack(sweep_list, dim=1)  # dim=1 là num_invdepth
+        out = self.transfer_conv(sweep)  # nếu muốn, chỉnh kích thước CH
+        return out
+
 
 
 
