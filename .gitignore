@@ -12,3 +12,4 @@ sweep_result/
 val_results/
 tmp/
 src_2/
+inference_results/

@@ -1,15 +1,6 @@
-import os
-import math
-import argparse
-import random
-import numpy as np
 import torch
-import torch.nn as nn
-import torch.backends.cudnn as cudnn
-from torch.utils.data import DataLoader, Subset
-from torchvision import transforms
-from tqdm import tqdm
 import matplotlib.pyplot as plt
+from torchvision import transforms
 
 from dataloader import OmniStereoDataset
 from dataloader.custom_transforms import Resize, ToTensor, Normalize
@@ -17,153 +8,142 @@ from models import OmniMVS, SphericalSweeping
 from utils import InvDepthConverter
 
 # ----------------------------
-# DETERMINISTIC / SEED (GIỐNG TRAIN)
+# CONFIG
 # ----------------------------
-torch.backends.cudnn.deterministic = True
-cudnn.benchmark = False
+ROOT_DIR = r"F:\tmp\datasets\omnithings"
+LIST_FILE = r".\dataloader\omnithings_val.txt"
+CHECKPOINT = r"F:\omnimvs_pytorch\checkpoints\pretrain\checkpoint_60.pth"
 
-random.seed(42)
-np.random.seed(42)
-torch.manual_seed(42)
-torch.cuda.manual_seed_all(42)
+FOV = 220
+NDISP = 48
+MIN_DEPTH = 0.55
 
-# ----------------------------
-# UTILS
-# ----------------------------
-def save_depth_as_colormap(depth, path, vmin=None, vmax=None):
-    depth = depth.detach().squeeze().cpu().numpy()
-    if vmin is None: vmin = depth.min()
-    if vmax is None: vmax = depth.max()
-    depth = (depth - vmin) / (vmax - vmin + 1e-8)
-    cmap = plt.get_cmap('jet')(depth)[:, :, :3]
-    plt.imsave(path, (cmap * 255).astype(np.uint8))
+INPUT_W, INPUT_H = 500, 480
+OUT_W, OUT_H = 512, 256
 
-def save_rgb_image(img, path):
-    img = img.detach().cpu()
-    if img.shape[0] == 1:
-        img = img.repeat(3, 1, 1)
-    img = (img * 0.5 + 0.5).clamp(0, 1)
-    img_np = img.permute(1, 2, 0).numpy()
-    plt.imsave(path, img_np)
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 
 # ----------------------------
-# INFERENCE
+# LOAD MODEL
 # ----------------------------
-@torch.no_grad()
-def inference(args):
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
-    # ---- MODEL (GIỐNG TRAIN) ----
+def load_model():
     sweep = SphericalSweeping(
-        args.root_dir,
-        h=args.output_height,
-        w=args.output_width,
-        fov=args.fov
+        ROOT_DIR,
+        h=OUT_H,
+        w=OUT_W,
+        fov=FOV
     )
 
     model = OmniMVS(
         sweep,
-        args.ndisp,
-        args.min_depth,
-        h=args.output_height,
-        w=args.output_width
-    ).to(device)
+        ndisp=NDISP,
+        min_depth=MIN_DEPTH,
+        h=OUT_H,
+        w=OUT_W
+    )
 
-    checkpoint = torch.load(args.checkpoint, map_location=device)
-    model.load_state_dict(checkpoint['state_dict'])
-    model = nn.DataParallel(model)
+    ckpt = torch.load(CHECKPOINT, map_location=DEVICE)
+    model.load_state_dict(ckpt["state_dict"])
+
+    model = model.to(DEVICE)
     model.eval()
+    return model
 
-    # ---- INV DEPTH CONVERTER ----
-    invd_0, invd_max = model.module.inv_depths[0], model.module.inv_depths[-1]
-    converter = InvDepthConverter(args.ndisp, invd_0, invd_max)
 
-    # ---- DATASET (GIỐNG TRAIN) ----
-    image_size = (args.input_width, args.input_height)
-    depth_size = (args.output_width, args.output_height)
+# ----------------------------
+# VISUALIZATION
+# ----------------------------
+def visualize(batch, pred_depth, cam_list):
+    plt.figure(figsize=(15, 4))
 
+    # show input images
+    for i, cam in enumerate(cam_list):
+        img = batch[cam][0, 0].cpu().numpy()  # [1,1,H,W] -> [H,W]
+        plt.subplot(1, len(cam_list) + 1, i + 1)
+        plt.imshow(img, cmap="gray")
+        plt.title(cam)
+        plt.axis("off")
+
+    # show predicted depth
+    plt.subplot(1, len(cam_list) + 1, len(cam_list) + 1)
+    plt.imshow(
+        pred_depth[0].cpu().numpy(),
+        cmap="jet",
+        vmin=0.5,
+        vmax=10.0
+    )
+    plt.title("Pred Depth (meters)")
+    plt.axis("off")
+
+    plt.tight_layout()
+    plt.show()
+
+
+# ----------------------------
+# MAIN
+# ----------------------------
+def main():
+    # same transform as training
     transform = transforms.Compose([
-        Resize(image_size, depth_size),
+        Resize((INPUT_W, INPUT_H), (OUT_W, OUT_H)),
         ToTensor(),
         Normalize()
     ])
 
     dataset = OmniStereoDataset(
-        args.root_dir,
-        args.list,
+        root_dir=ROOT_DIR,
+        filename_txt=LIST_FILE,
         transform=transform,
-        fov=args.fov
+        fov=FOV
     )
 
-    # ---- SUBSET GIỐNG TRAIN ----
-    subset_size = math.ceil(len(dataset) / 300)
-    subset = Subset(dataset, range(subset_size))
-
-    loader = DataLoader(
-        subset,
+    # pick one sample
+    idx = 100
+    loader = torch.utils.data.DataLoader(
+        dataset,
         batch_size=1,
         shuffle=False,
-        num_workers=0,
-        pin_memory=True
+        sampler=[idx]
     )
 
-    os.makedirs(args.out_dir, exist_ok=True)
+    batch = next(iter(loader))
 
-    # ---- LOOP ----
-    for idx, batch in enumerate(tqdm(loader)):
-        for k in batch:
-            batch[k] = batch[k].to(device, non_blocking=True)
+    # move to device
+    for k in batch:
+        batch[k] = batch[k].to(DEVICE)
 
-        pred_idx = model(batch)                       # (1, H, W)
-        pred_idepth = converter.index_to_invdepth(pred_idx)
+    # load model
+    model = load_model()
 
-        # Save RGB
-        for cam in model.module.cam_list:
-            save_rgb_image(
-                batch[cam][0],
-                os.path.join(args.out_dir, f"{idx:04d}_{cam}.png")
-            )
+    # ---------------- INFERENCE ----------------
+    with torch.no_grad():
+        pred_idx = model(batch)   # [B, H, W] disparity index
 
-        # Save depth
-        save_depth_as_colormap(
-            pred_idepth[0],
-            os.path.join(args.out_dir, f"{idx:04d}_pred.png")
-        )
+    # -------- index -> depth --------
+    invd_0 = model.inv_depths[0]
+    invd_max = model.inv_depths[-1]
 
-    print("✅ Inference finished.")
+    converter = InvDepthConverter(
+        ndisp=NDISP,
+        invd_0=invd_0,
+        invd_max=invd_max
+    )
 
-# ----------------------------
-# MAIN
-# ----------------------------
+    pred_invdepth = converter.index_to_invdepth(pred_idx)
+    pred_depth = 1.0 / (pred_invdepth + 1e-8)
+
+    # debug: check collapse
+    print(
+        "pred_idx stats:",
+        pred_idx.min().item(),
+        pred_idx.max().item(),
+        pred_idx.mean().item()
+    )
+
+    # visualize
+    visualize(batch, pred_depth, dataset.cam_list)
+
+
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-
-    parser.add_argument(
-        'root_dir',
-        nargs='?',
-        default=r'F:\tmp\datasets\omnithings'
-    )
-
-    parser.add_argument(
-        '-v', '--list',
-        default=r'.\dataloader\omnithings_train.txt'
-    )
-
-    parser.add_argument(
-        '--checkpoint',
-        default=r'F:\omnimvs_pytorch\checkpoints\pretrain\checkpoints_31.pth'
-    )
-
-    parser.add_argument('--out_dir', default='inference_results')
-
-    parser.add_argument('--ndisp', type=int, default=48)
-    parser.add_argument('--min_depth', type=float, default=0.55)
-    parser.add_argument('--fov', type=float, default=220)
-
-    parser.add_argument('--input_width', type=int, default=500)
-    parser.add_argument('--input_height', type=int, default=480)
-    parser.add_argument('--output_width', type=int, default=512)
-    parser.add_argument('--output_height', type=int, default=256)
-
-    args = parser.parse_args()
-    inference(args)
+    main()
