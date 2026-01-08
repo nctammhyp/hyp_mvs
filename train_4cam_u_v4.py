@@ -18,6 +18,7 @@ from dataloader import OmniStereoDataset
 from dataloader.custom_transforms import Resize, ToTensor, Normalize
 from models import OmniMVS, SphericalSweeping
 from utils import InvDepthConverter
+from torch.utils.data import DataLoader, Subset
 
 # ----------------------------
 # Seed
@@ -122,7 +123,23 @@ def main():
         Normalize()
     ])
     dataset = OmniStereoDataset(args.root_dir, args.train_list, transform=transform, fov=args.fov)
-    loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=4, pin_memory=True)
+    # loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=4, pin_memory=True)
+    # Dataset đầy đủ
+    dataset = OmniStereoDataset(args.root_dir, args.train_list, transform=transform, fov=args.fov)
+
+    # Lấy 50 ảnh đầu tiên để test nhanh
+    subset_size = 50
+    subset_dataset = Subset(dataset, range(subset_size))
+
+    # Dataloader
+    loader = DataLoader(
+        subset_dataset,
+        batch_size=args.batch_size,
+        shuffle=True,
+        num_workers=4,
+        pin_memory=True
+    )
+
 
     # ----------------------------
     # Logger
