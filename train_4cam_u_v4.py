@@ -32,7 +32,7 @@ torch.cuda.manual_seed_all(42)
 # Arguments
 # ----------------------------
 parser = argparse.ArgumentParser()
-parser.add_argument('root_dir', nargs='?', default='/home/user/datasets/omnithings')
+parser.add_argument('root_dir', nargs='?', default='/home/sw-tamnguyen/Desktop/depth_project/datasets/datasets/omnithings')
 parser.add_argument('-t', '--train-list', default='./dataloader/omnithings_train.txt')
 parser.add_argument('--epochs', default=30, type=int)
 parser.add_argument('-b', '--batch-size', default=2, type=int)
