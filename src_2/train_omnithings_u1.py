@@ -39,7 +39,7 @@ def main():
     
     # --- CẤU HÌNH ---
     parser.add_argument('--epochs', type=int, default=50)
-    parser.add_argument('--batch_size', type=int, default=1)
+    parser.add_argument('--batch_size', type=int, default=4)
     parser.add_argument('--lr', type=float, default=1e-3)
     parser.add_argument('--ndisp', type=int, default=48)
     
