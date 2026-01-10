@@ -52,7 +52,7 @@ def main():
     trainset = OmniStereoDataset(args.root_dir, args.train_list, transform=transform)
     
     # Tăng tỷ lệ subset lên để mô hình thấy đủ độ đa dạng
-    indices = np.random.choice(len(trainset), int(0.01 * len(trainset)), replace=False)
+    indices = np.random.choice(len(trainset), int(0.1 * len(trainset)), replace=False)
     train_loader = DataLoader(Subset(trainset, indices), batch_size=args.batch_size, shuffle=True)
 
     log_folder = os.path.join('checkpoints', f'omni_{datetime.now().strftime("%m%d-%H%M")}')
