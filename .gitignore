@@ -14,3 +14,6 @@ tmp/
 # src_2/
 inference_results/
 src_2/data/
+src_2/checkpoints_omnithings
+src_2/__pycache__
+src_2/results

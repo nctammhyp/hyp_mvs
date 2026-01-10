@@ -1,4 +1,4 @@
-# module/network_fixed.py
+# module/network.py
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -46,16 +46,20 @@ class SphericalSweep(nn.Module):
             if not isinstance(g, torch.Tensor):
                 g = torch.from_numpy(g).float()
             g = g.to(feature.device)
-            if g.ndim == 3:  # [H,W,2] -> [B,H,W,2]
+            
+            if g.ndim == 3:  # [H,W,2]
                 g = g.unsqueeze(0).repeat(B, 1, 1, 1)
+            elif g.ndim == 4 and g.shape[0] == 1:
+                g = g.repeat(B, 1, 1, 1)
+                
             sweep_list.append(F.grid_sample(feature, g, align_corners=True))
 
         sweep = torch.stack(sweep_list, dim=1)  # [B,D,C,H,W]
 
-        # reshape để Conv2d nhận 4D input
         B, D, C, H, W = sweep.shape
         sweep_reshape = sweep.reshape(B * D, C, H, W)
         out = self.transfer_conv(sweep_reshape)
+        
         _, C_out, H_out, W_out = out.shape
         out = out.view(B, D, C_out, H_out, W_out)
         return out
@@ -64,32 +68,44 @@ class SphericalSweep(nn.Module):
 # Cost volume computation
 # -----------------------------
 class CostCompute(nn.Module):
-    def __init__(self, CH=32):
+    def __init__(self, CH=32, input_channels=64):
         super().__init__()
         CH2 = CH * 2
-        self.fusion = Conv3D(2*CH, CH, 3, 1, 1)
+        self.fusion = Conv3D(input_channels, CH, 3, 1, 1)
+        
         convs = []
+        # Downsample Block 1 (Scale 1)
         convs += [Conv3D(CH, CH, 3, 1, 1),
                   Conv3D(CH, CH, 3, 1, 1),
                   Conv3D(CH, CH, 3, 1, 1)]
+        # Downsample Block 2 (Scale 1/2)
         convs += [Conv3D(CH, CH2, 3, 2, 1),
                   Conv3D(CH2, CH2, 3, 1, 1),
                   Conv3D(CH2, CH2, 3, 1, 1)]
+        # Downsample Block 3 (Scale 1/4)
         convs += [Conv3D(CH2, CH2, 3, 2, 1),
                   Conv3D(CH2, CH2, 3, 1, 1),
                   Conv3D(CH2, CH2, 3, 1, 1)]
+        # Downsample Block 4 (Scale 1/8)
         convs += [Conv3D(CH2, CH2, 3, 2, 1),
                   Conv3D(CH2, CH2, 3, 1, 1),
                   Conv3D(CH2, CH2, 3, 1, 1)]
+        # Downsample Block 5 (Scale 1/16)
         convs += [Conv3D(CH2, CH2*2, 3, 2, 1),
                   Conv3D(CH2*2, CH2*2, 3, 1, 1),
                   Conv3D(CH2*2, CH2*2, 3, 1, 1)]
         self.convs = nn.ModuleList(convs)
-        self.deconv1 = DeConv3D(CH2*2, CH2, 3, 2, 1, out_pad=1)
-        self.deconv2 = DeConv3D(CH2, CH2, 3, 2, 1, out_pad=1)
-        self.deconv3 = DeConv3D(CH2, CH2, 3, 2, 1, out_pad=1)
-        self.deconv4 = DeConv3D(CH2, CH, 3, 2, 1, out_pad=1)
-        self.deconv5 = DeConv3D(CH, 1, 3, 2, 1, out_pad=1, bn=False, relu=False)
+
+        # Upsample Blocks to restore size
+        self.deconv1 = DeConv3D(CH2*2, CH2, 3, 2, 1, out_pad=1) # -> 1/8
+        self.deconv2 = DeConv3D(CH2, CH2, 3, 2, 1, out_pad=1)   # -> 1/4
+        self.deconv3 = DeConv3D(CH2, CH2, 3, 2, 1, out_pad=1)   # -> 1/2
+        self.deconv4 = DeConv3D(CH2, CH, 3, 2, 1, out_pad=1)    # -> 1/1 (Original Size)
+        
+        # --- FIX: Thay đổi lớp cuối cùng ---
+        # Cũ: DeConv3D -> Upsample x2 -> Lỗi Depth 48 thành 96
+        # Mới: Conv3D -> Giữ nguyên kích thước, chỉ giảm Channel về 1
+        self.deconv5 = Conv3D(CH, 1, 3, 1, 1, bn=False, relu=False)
 
     def forward(self, feats):
         c = self.fusion(feats)
@@ -120,14 +136,16 @@ class OmniMVSNet(nn.Module):
         else:
             raise TypeError("varargin must be dict or EasyDict or None")
 
-        # gán mặc định cho attribute để có self.opts.CH,...
         self.opts.CH = self.opts.get('CH', 32)
         self.opts.num_invdepth = self.opts.get('num_invdepth', 192)
         self.opts.use_rgb = self.opts.get('use_rgb', False)
+        self.opts.num_cams = self.opts.get('num_cams', 4) 
 
         self.feature_layers = FeatureLayers(self.opts.CH, self.opts.use_rgb)
         self.spherical_sweep = SphericalSweep(self.opts.CH)
-        self.cost_computes = CostCompute(self.opts.CH)
+        
+        total_input_channels = self.opts.num_cams * self.opts.CH
+        self.cost_computes = CostCompute(self.opts.CH, input_channels=total_input_channels)
 
         self.register_buffer(
             "disps",
@@ -137,9 +155,16 @@ class OmniMVSNet(nn.Module):
 
     def forward(self, imgs, grids, upsample=False, out_cost=False):
         feats = [self.feature_layers(x) for x in imgs]
-        spherical_feats_list = [self.spherical_sweep(feats[i], grids) for i in range(len(imgs))]
-        spherical_feats = torch.stack(spherical_feats_list, dim=0).permute(1,0,2,3,4)
-        costs = self.cost_computes(spherical_feats)
+        spherical_feats_list = [self.spherical_sweep(f, grids) for f in feats]
+        
+        spherical_feats = torch.stack(spherical_feats_list, dim=1) # [B, N, D, C, H, W]
+        B, N, D, C, H, W = spherical_feats.shape
+        
+        # Merge N and C for Cost Volume Input
+        spherical_feats = spherical_feats.permute(0, 1, 3, 2, 4, 5) # [B, N, C, D, H, W]
+        spherical_feats = spherical_feats.reshape(B, N * C, D, H, W)
+
+        costs = self.cost_computes(spherical_feats) # [B, 1, D, H, W]
 
         if upsample:
             costs = F.interpolate(costs.squeeze(1), scale_factor=2, mode='bilinear', align_corners=True)
