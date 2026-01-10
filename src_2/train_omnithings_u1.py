@@ -22,7 +22,7 @@ def main():
     # parser.add_argument('--train_list', type=str, default=r'F:\hyp_mvs_clean\dataloader\omnithings_train.txt')
 
     parser.add_argument(
-    'root_dir',
+    '--root',
     nargs='?',
     default='/home/sw-tamnguyen/Desktop/depth_project/datasets/datasets/omnithings'
     )
