@@ -29,7 +29,7 @@ def main():
 
     parser.add_argument(
         '-t', '--train-list',
-        default='./dataloader/omnithings_train.txt'
+        default='../dataloader/omnithings_train.txt'
     )
 
     parser.add_argument(
