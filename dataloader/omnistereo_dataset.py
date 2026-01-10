@@ -64,6 +64,7 @@ def load_invdepth(filename, min_depth=55):
     '''
     min_depth in [cm]
     '''
+    # print(f"Loading inverse depth from: {filename}")
     invd_value = cv2.imread(filename, cv2.IMREAD_ANYDEPTH)
     invdepth = (invd_value / 100.0) / (min_depth * 655) + np.finfo(np.float32).eps
     invdepth *= 100  # unit conversion from cm to m
