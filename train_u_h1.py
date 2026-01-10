@@ -165,7 +165,7 @@ def main():
     # )
 
     # ===== TỈ LỆ LẤY =====
-    percent = 0.05  # ví dụ: lấy 20%
+    percent = 0.01  # ví dụ: lấy 20%
     num_samples = len(trainset)
     subset_size = int(percent * num_samples)
 
