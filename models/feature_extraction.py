@@ -19,7 +19,7 @@ class BasicBlock(nn.Module):
 
 
 class UnaryExtraction(nn.Module):
-    def __init__(self, input_channel=1):
+    def __init__(self, input_channel=3):
         super(UnaryExtraction, self).__init__()
         self.conv1 = nn.Sequential(
             nn.Conv2d(input_channel, 32, kernel_size=5, stride=2, padding=2, bias=False),
