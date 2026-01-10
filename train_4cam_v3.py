@@ -254,7 +254,7 @@ def main():
     transform = transforms.Compose([Resize(image_size, depth_size), ToTensor(), Normalize()])
     trainset = OmniStereoDataset(args.root_dir, args.train_list, transform=transform, fov=args.fov)
 
-    subset_size = math.ceil(len(trainset)/30)
+    subset_size = math.ceil(len(trainset)/100)
     train_subset = Subset(trainset, range(subset_size))
 
     train_loader = DataLoader(train_subset, batch_size=args.batch_size, shuffle=True)
